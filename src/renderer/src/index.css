@@ -1,0 +1,62 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #f7f5f0;
+  color: #091428;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+@layer components {
+  /* Gold hairline rule used to separate premium surfaces. */
+  .rule-gold {
+    @apply border-gold/40;
+  }
+
+  .btn-gold {
+    @apply inline-flex items-center justify-center gap-2 rounded-md bg-gold px-4 py-2 font-medium text-navy
+           shadow-sm transition hover:bg-gold-400 active:bg-gold-600
+           disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-md border border-navy/15 px-3 py-1.5
+           text-sm text-navy transition hover:border-gold hover:text-navy-700
+           disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .panel {
+    @apply rounded-xl border border-navy/10 bg-white shadow-panel;
+  }
+
+  .panel-heading {
+    @apply font-display text-2xl font-semibold tracking-tight text-navy;
+  }
+
+  .field-label {
+    @apply text-xs font-medium uppercase tracking-wide text-navy/50;
+  }
+
+  .input {
+    @apply w-full rounded-md border border-navy/15 bg-white px-3 py-2 text-sm text-navy
+           outline-none transition focus:border-gold focus:ring-2 focus:ring-gold/30;
+  }
+
+  /* "Not captured" markers for empty extracted fields. */
+  .not-captured {
+    @apply italic text-navy/35;
+  }
+}

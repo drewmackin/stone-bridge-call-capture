@@ -1,0 +1,28 @@
+# Secrets — NEVER commit
+.env
+*.serviceaccount.json
+service-account*.json
+google-credentials*.json
+
+# Recordings & generated data (sacred local data — keep off version control)
+/recordings/
+/models/
+*.sqlite
+*.sqlite-journal
+*.wav
+*.mp3
+
+# Build output
+node_modules/
+out/
+dist/
+.vite/
+.sidecar-build/
+resources/whisper-sidecar/_internal/
+resources/whisper-sidecar/stone-whisper
+
+# OS / editor
+.DS_Store
+*.log
+.idea/
+.vscode/

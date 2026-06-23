@@ -1,0 +1,41 @@
+appId: com.stonebridge.callcapture
+productName: Stone Bridge Call Capture
+copyright: Copyright © Stone Bridge Strategic Partners
+
+directories:
+  buildResources: build
+  output: dist
+
+files:
+  - out/**/*
+  - package.json
+
+# Bundle the Python transcription sidecar and ffmpeg as untouched resources.
+extraResources:
+  - from: resources
+    to: resources
+    filter:
+      - '**/*'
+
+asar: true
+
+mac:
+  category: public.app-category.business
+  target:
+    - target: dmg
+      arch:
+        - arm64
+  # Hardened runtime is OFF: this app is ad-hoc signed (no Apple Developer ID), and
+  # hardened runtime would then ENFORCE the mic entitlement that an ad-hoc/linker
+  # signature can't carry — silently blocking the microphone. Off => macOS uses the
+  # normal TCC mic prompt, which works for a locally-built app. (Turn this back on
+  # only alongside a real Developer ID signature + notarization.)
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  extendInfo:
+    NSMicrophoneUsageDescription: Stone Bridge Call Capture records call audio from the microphone you select so it can transcribe the conversation. Audio stays on this Mac.
+
+dmg:
+  title: Stone Bridge Call Capture
