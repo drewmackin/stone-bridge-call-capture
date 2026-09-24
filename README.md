@@ -97,8 +97,8 @@ tests/fixtures/      test‑only stubs (never bundled)
 ## Develop
 
 ```bash
-npm install
-npm run rebuild      # rebuild better-sqlite3 against Electron's ABI (once)
+npm install          # also: rebuild better-sqlite3 for Electron, re-sign dev Electron, create private .env
+npm run keys         # open your private .env (~/Library/Application Support/stone-bridge-call-capture/.env)
 npm run dev          # launch with hot reload
 npm run typecheck    # strict TypeScript across main + renderer
 npm run verify       # build + run the headless self-test suite (below) on a throwaway profile
@@ -108,7 +108,7 @@ npm run verify       # build + run the headless self-test suite (below) on a thr
 synthetic microphone — for design work and screenshots. Scenarios via `?s=default|empty|setup|nomic|fail`.
 
 ```bash
-node_modules/.bin/vite --config design/harness/vite.config.mts   # → http://localhost:8030/?s=default
+npm run ui   # → http://localhost:8030/?s=default
 ```
 
 ### Built‑in self‑tests (no GUI, no secrets needed)

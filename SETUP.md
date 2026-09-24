@@ -26,8 +26,9 @@ The app is built with Node.js.
 4. Install and prepare it (one time):
    ```
    $ npm install
-   $ npm run rebuild
    ```
+   This one command also rebuilds the database module for the app, fixes the macOS "malware"
+   block on the development copy of Electron, and creates your private `.env` file (step 8).
 5. Launch it:
    ```
    $ npm run dev
@@ -155,11 +156,15 @@ identity), so there's no sign‑in popup.
 
 ## 8. Fill in the `.env` file
 
-1. In the project folder, copy the example file to a real one:
+`npm install` already created your private `.env` (from `.env.example`) in the app's data folder,
+`~/Library/Application Support/stone-bridge-call-capture/.env` — the one place both `npm run dev`
+and the installed app read it from.
+
+1. Open it:
    ```
-   $ cp .env.example .env
+   $ npm run keys
    ```
-2. Open `.env` in any text editor and fill in the values you collected:
+2. Fill in the values you collected:
 
    - `ANTHROPIC_API_KEY` — your `sk-ant-…` key from step 6. **Required.**
    - `GOOGLE_SERVICE_ACCOUNT_KEY_PATH` — the full path to the `.json` file from step 7C, e.g.
@@ -168,10 +173,10 @@ identity), so there's no sign‑in popup.
    - `OPERATOR_SHARE_EMAIL` — your Google email (so the created sheet shows up in your Drive).
    - `HUGGINGFACE_TOKEN` — optional, from step 5.
    - Leave the rest at their defaults (`OPERATOR_STATE=MA`, `WHISPER_MODEL=small`,
-     `AUDIO_MODE=speakerphone`, `AUDIBLE_DISCLOSURE=true`).
+     `AUDIO_MODE=speakerphone`).
 
-3. Save the file. **Never share `.env` or the `.json` key** — they're your secrets and are excluded
-   from version control.
+3. Save the file. **Never commit `.env` or the `.json` key** — they're secrets, git ignores them,
+   and this repository is public. To give a teammate access, see “Working with a teammate” below.
 
 Restart the app (`Ctrl‑C` in Terminal, then `npm run dev`). The status button at the top right of
 the window should now read **All set** (click it to see each service).
@@ -229,6 +234,32 @@ always kept — read it on the lead’s page and fill the fields yourself. The a
 **Microphone is blocked.**
 System Settings → Privacy & Security → Microphone → enable the app (or Terminal), then click the
 **refresh** button next to the Microphone menu on Record.
+
+---
+
+## Working with a teammate
+
+Both of you work on the same GitHub repository. Code goes through GitHub; **keys never do.**
+
+1. **Access** — the owner adds the teammate on GitHub: repository → Settings → Collaborators →
+   Add people. The teammate accepts the email invite.
+2. **Code** — the teammate clones it (GitHub Desktop → File → Clone repository), then follows
+   steps 1–4 above. `npm install` sets everything up, including an empty private `.env`.
+3. **Keys** — shared privately, never in the repo:
+   - `ANTHROPIC_API_KEY` — best if the teammate uses **their own** key (console.anthropic.com), so
+     usage and billing stay separate.
+   - Google — to push to the **same** Sheet/Calendar, the owner sends the service-account `.json`
+     file privately (AirDrop, or a shared password-manager item) and the teammate puts its path in
+     `GOOGLE_SERVICE_ACCOUNT_KEY_PATH`. For experiments, use a **separate test Sheet**
+     (`GOOGLE_SHEET_ID`) so real leads aren't touched.
+   - `HUGGINGFACE_TOKEN` (optional) — free; each person can make their own.
+   - `OPERATOR_SHARE_EMAIL` / `CALENDAR_ID` — the teammate's own Google email.
+   Run `npm run keys` to open the `.env` and paste them in.
+4. **Without any keys** the app still runs: recording and saving work, and the Setup button says
+   what's missing. For screen/UI work, `npm run ui` opens the real interface in a browser with
+   sample data — no keys, no microphone needed.
+5. **Day to day** — make a branch per change (GitHub Desktop → Branch → New Branch), push it,
+   open a pull request, merge into `main`, then everyone clicks **Pull origin** on `main`.
 
 ---
 

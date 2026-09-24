@@ -19,7 +19,9 @@
     "test": "node --test",
     "dist": "electron-vite build && electron-builder --mac --arm64",
     "dist:dir": "electron-vite build && electron-builder --mac --arm64 --dir",
-    "postinstall": "codesign --force --deep --sign - node_modules/electron/dist/Electron.app || echo 'postinstall: could not re-sign dev Electron (see scripts/adhoc-sign.cjs)'"
+    "postinstall": "node scripts/postinstall.cjs",
+    "keys": "node scripts/setup-env.cjs --open",
+    "ui": "vite --config design/harness/vite.config.mts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.1",
