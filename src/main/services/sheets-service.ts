@@ -2,6 +2,10 @@
 // Sheets service — IPC wiring for pushing leads to Google Sheets and removing a
 // Sheet row. A failed push never loses the local record (it remains the source
 // of truth); the error is returned for the UI to surface with a retry.
+//
+// Every Google write runs through ONE promise-chain lock: two overlapping IPC
+// calls (double-click Push, Push + Push all) would otherwise both read the id
+// column, both miss the lead, and both append — a duplicate row.
 // =============================================================================
 
 import { ipcMain } from 'electron'
@@ -10,24 +14,51 @@ import { getConfig } from '../config'
 import { getDb } from '../db/connection'
 import { getSetting } from '../db/settings'
 import { insertLead, newLeadSkeleton } from '../db/leads'
-import { pushAllApproved, pushLead, deleteSheetRow } from '../sheets/sync'
+import type { CalendarResult } from '@shared/types'
+import { errMsg } from '@shared/errors'
+import { pushAllApproved, pushLead, deleteSheetRow, SETTING_SHEET_ID } from '../sheets/sync'
 import { syncEventForLead } from '../calendar/sync'
+
+let googleWrites: Promise<unknown> = Promise.resolve()
+
+/** Run `fn` after every previously queued Google write has settled. */
+function serialized<T>(fn: () => Promise<T>): Promise<T> {
+  const run = googleWrites.then(fn, fn)
+  googleWrites = run.catch(() => {}) // one failure must not jam the queue
+  return run
+}
+
+/** Calendar sync that can never throw — its failure must not block the Sheet push. */
+async function safeCalendarSync(id: string): Promise<CalendarResult> {
+  try {
+    return await syncEventForLead(id)
+  } catch (e) {
+    return { ok: false, skipped: false, eventLink: null, created: false, error: errMsg(e) }
+  }
+}
 
 export function registerSheetsIpc(): void {
   // Committing a lead = mirror to the Sheet AND file a calendar follow-up (if a
-  // meeting time exists). Both are attempted and reported independently.
-  ipcMain.handle(IPC.PUSH_LEAD, async (_e, id: string) => {
-    const res = await pushLead(id)
-    res.calendar = await syncEventForLead(id)
-    return res
-  })
-  ipcMain.handle(IPC.PUSH_ALL_APPROVED, async () => {
-    const results = await pushAllApproved()
-    // Calendar syncs are independent per lead — run them concurrently.
-    await Promise.all(results.map(async (r) => { r.calendar = await syncEventForLead(r.leadId) }))
-    return results
-  })
-  ipcMain.handle(IPC.DELETE_SHEET_ROW, (_e, id: string) => deleteSheetRow(id))
+  // meeting time exists). Calendar goes FIRST so the Sheet row's hidden event
+  // link (column M) is filled on the very first push; each is reported
+  // independently.
+  ipcMain.handle(IPC.PUSH_LEAD, (_e, id: string) =>
+    serialized(async () => {
+      const calendar = await safeCalendarSync(id)
+      const res = await pushLead(id)
+      res.calendar = calendar
+      return res
+    })
+  )
+  ipcMain.handle(IPC.PUSH_ALL_APPROVED, () =>
+    serialized(async () => {
+      const results = await pushAllApproved()
+      // Calendar syncs are independent per lead — run them concurrently.
+      await Promise.all(results.map(async (r) => { r.calendar = await safeCalendarSync(r.leadId) }))
+      return results
+    })
+  )
+  ipcMain.handle(IPC.DELETE_SHEET_ROW, (_e, id: string) => serialized(() => deleteSheetRow(id)))
 }
 
 /**
@@ -59,9 +90,11 @@ export async function runSheetTransferDemo(): Promise<string> {
   })
   insertLead(lead)
 
-  const push = await pushLead(lead.id)
-  const calendar = await syncEventForLead(lead.id)
-  const sheetId = getSetting('google_sheet_id') || getConfig().googleSheetId
+  const { push, calendar } = await serialized(async () => {
+    const calendar = await safeCalendarSync(lead.id)
+    return { push: await pushLead(lead.id), calendar }
+  })
+  const sheetId = getSetting(SETTING_SHEET_ID) || getConfig().googleSheetId
   const url = sheetId ? `https://docs.google.com/spreadsheets/d/${sheetId}/edit` : ''
   return JSON.stringify({ push, calendar, sheetId, url }, null, 2)
 }

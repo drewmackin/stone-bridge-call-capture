@@ -1,6 +1,9 @@
 // =============================================================================
 // Schema + migrations. Idempotent: safe to run on every startup. A user_version
-// pragma gates future migrations.
+// pragma gates future migrations. The whole upgrade (DDL + the user_version
+// bump) runs in ONE transaction: a crash midway rolls back to the old version
+// instead of leaving an added column with a stale version, which would make
+// the next launch fail on "duplicate column name" and brick startup.
 // =============================================================================
 
 import type { Database as DB } from 'better-sqlite3'
@@ -10,7 +13,10 @@ const SCHEMA_VERSION = 3
 export function runMigrations(db: DB): void {
   const current = (db.pragma('user_version', { simple: true }) as number) ?? 0
   if (current >= SCHEMA_VERSION) return
+  db.transaction(() => migrate(db, current))()
+}
 
+function migrate(db: DB, current: number): void {
   if (current < 1) db.exec(`
     CREATE TABLE IF NOT EXISTS leads (
       id                TEXT PRIMARY KEY,

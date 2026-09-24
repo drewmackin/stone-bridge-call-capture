@@ -1,28 +1,55 @@
 import type { Lead } from '@shared/types'
+import { AlertIcon, CheckIcon, SheetIcon, TrashIcon } from './icons'
 
-const STATUS_STYLES: Record<Lead['status'], string> = {
-  new: 'bg-sky-100 text-sky-700',
-  reviewed: 'bg-violet-100 text-violet-700',
-  pushed: 'bg-emerald-100 text-emerald-700',
-  archived: 'bg-navy/10 text-navy/50'
+// One vocabulary everywhere: the data's "reviewed" is shown as "Approved" (it is
+// what "approved for push" means), "pushed" as "In Sheet". Every badge pairs an
+// icon or word with its color, so status never relies on color alone.
+const LABEL: Record<Lead['status'], string> = {
+  new: 'New',
+  reviewed: 'Approved',
+  pushed: 'In Sheet',
+  archived: 'Archived'
+}
+
+export function statusLabel(status: Lead['status']): string {
+  return LABEL[status]
 }
 
 export default function StatusBadge({ lead }: { lead: Lead }): JSX.Element {
-  return (
-    <div className="flex shrink-0 items-center gap-1.5">
-      {lead.needs_review && (
-        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
-          review
-        </span>
-      )}
-      <span
-        className={
-          'rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ' +
-          STATUS_STYLES[lead.status]
-        }
-      >
-        {lead.status}
+  if (lead.deleted_at) {
+    return (
+      <span className="badge bg-ink/[0.07] text-ink-2">
+        <TrashIcon className="h-3 w-3" />
+        In Trash
       </span>
-    </div>
-  )
+    )
+  }
+  if (lead.needs_review && lead.status === 'new') {
+    return (
+      <span className="badge bg-warn-bg text-warn">
+        <AlertIcon className="h-3 w-3" />
+        Needs review
+      </span>
+    )
+  }
+  switch (lead.status) {
+    case 'new':
+      return <span className="badge bg-info-bg text-info">New</span>
+    case 'reviewed':
+      return (
+        <span className="badge bg-gold-100 text-gold-900">
+          <CheckIcon className="h-3 w-3" />
+          Approved
+        </span>
+      )
+    case 'pushed':
+      return (
+        <span className="badge bg-ok-bg text-ok">
+          <SheetIcon className="h-3 w-3" />
+          In Sheet
+        </span>
+      )
+    default:
+      return <span className="badge bg-ink/[0.07] text-ink-2">Archived</span>
+  }
 }

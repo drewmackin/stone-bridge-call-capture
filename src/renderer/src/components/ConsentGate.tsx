@@ -1,94 +1,78 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useId, useMemo } from 'react'
 import type { JurisdictionRule } from '@shared/types'
 import { effectiveRule } from '../lib/consent'
-import type { ConsentPayload } from '../hooks/useRecorder'
+import { ExternalIcon, ShieldIcon } from './icons'
 
 interface Props {
+  jurisdictions: JurisdictionRule[]
+  /** The lead's (seller's) state code — controlled by the app so it survives page switches. */
+  value: string
   operatorState: string
   disabled: boolean
-  onChange: (payload: ConsentPayload, satisfied: boolean) => void
+  onChange: (code: string) => void
 }
 
 /**
- * Consent & compliance reference. Shows the lead's state and the applicable
- * recording-consent rule, and records the state + method with each capture. The
- * operator gives the notice verbally on the call — there is no on-screen script
+ * Seller's state + the recording-consent rule that applies, right where the call
+ * is started. The state and the method below are logged with every capture.
+ * The operator gives notice verbally on the call — there is no on-screen script
  * or attestation checkbox, and recording is not blocked on one.
  */
-export default function ConsentGate({ operatorState, disabled, onChange }: Props): JSX.Element {
-  const [jurisdictions, setJurisdictions] = useState<JurisdictionRule[]>([])
-  const [stateCode, setStateCode] = useState<string>(operatorState)
-
-  useEffect(() => {
-    window.stoneBridge.getJurisdictions().then(setJurisdictions).catch(() => setJurisdictions([]))
-  }, [])
-
+export default function ConsentGate({ jurisdictions, value, operatorState, disabled, onChange }: Props): JSX.Element {
+  const id = useId()
   const rule = useMemo(
-    () => effectiveRule(jurisdictions, stateCode, operatorState),
-    [jurisdictions, stateCode, operatorState]
+    () => effectiveRule(jurisdictions, value, operatorState),
+    [jurisdictions, value, operatorState]
   )
-
-  // Record the chosen state + method with each capture. Satisfied as long as a
-  // state is set (it defaults to your home state, so recording isn't gated on a
-  // click). script_acknowledged / audible_played are retained as false audit
-  // fields now that the on-screen script and disclosure were removed.
-  useEffect(() => {
-    onChange(
-      {
-        state: stateCode,
-        method: 'verbal notice given on the call',
-        script_acknowledged: false,
-        audible_played: false
-      },
-      !!stateCode
-    )
-  }, [stateCode, onChange])
-
-  const ruleColor =
-    rule.effective === 'all-party'
-      ? 'bg-amber-50 border-amber-300 text-amber-900'
-      : 'bg-emerald-50 border-emerald-300 text-emerald-900'
+  const allParty = rule.effective === 'all-party'
 
   return (
-    <div className="panel p-5">
-      <h2 className="panel-heading mb-4 text-lg">Consent &amp; compliance</h2>
-      <div className="space-y-3">
-        <div>
-          <label className="field-label">Lead’s state</label>
-          <select
-            className="input"
-            value={stateCode}
-            onChange={(e) => setStateCode(e.target.value)}
-            disabled={disabled}
-          >
-            <option value="">Select…</option>
-            {jurisdictions.map((j) => (
-              <option key={j.code} value={j.code}>
-                {j.state}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className={'rounded-lg border p-3 ' + ruleColor}>
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-sm font-semibold">
-              {rule.effective === 'all-party' ? 'All-party consent required' : 'One-party consent'}
-            </span>
-            {rule.jurisdiction && (
-              <a
-                href={rule.jurisdiction.source_url}
-                target="_blank"
-                rel="noreferrer"
-                className="shrink-0 text-[11px] underline opacity-80 hover:opacity-100"
-              >
-                {rule.jurisdiction.statute}
-              </a>
-            )}
-          </div>
-          <p className="mt-1 text-xs opacity-90">{rule.reason}</p>
+    <div>
+      <label htmlFor={id} className="t-label">
+        Seller’s state
+      </label>
+      <div className="mt-2 grid grid-cols-[minmax(0,180px)_minmax(0,1fr)] items-center gap-2">
+        <select
+          id={id}
+          className="input"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={disabled || jurisdictions.length === 0}
+          title={disabled ? 'The state is fixed for the call in progress' : undefined}
+        >
+          {jurisdictions.length === 0 && <option value="">Loading states…</option>}
+          {jurisdictions.length > 0 && <option value="">Choose a state…</option>}
+          {jurisdictions.map((j) => (
+            <option key={j.code} value={j.code}>
+              {j.state}
+            </option>
+          ))}
+        </select>
+        <div
+          className={
+            'flex h-9 min-w-0 items-center gap-1.5 rounded px-2.5 text-[12px] font-semibold ' +
+            (allParty ? 'bg-warn-bg text-warn' : 'bg-ok-bg text-ok')
+          }
+        >
+          <ShieldIcon className="h-3.5 w-3.5 shrink-0" />
+          <span className="shrink-0">{allParty ? 'All-party consent' : 'One-party consent'}</span>
+          {rule.jurisdiction && (
+            <a
+              href={rule.jurisdiction.source_url}
+              target="_blank"
+              rel="noreferrer"
+              className="ml-auto inline-flex min-w-0 items-center gap-1 text-[11.5px] font-medium underline decoration-current/40 underline-offset-2 hover:decoration-current"
+              title={`Open ${rule.jurisdiction.statute}`}
+            >
+              <span className="truncate">{rule.jurisdiction.statute}</span>
+              <ExternalIcon className="h-3 w-3 shrink-0" />
+            </a>
+          )}
         </div>
       </div>
+      <p className="t-meta mt-2" title="The state and method are saved with every recording">
+        {rule.reason} Logged: {value || '—'} · verbal notice.
+      </p>
     </div>
   )
 }

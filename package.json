@@ -18,7 +18,8 @@
     "verify": "bash ./scripts/run-selftests.sh",
     "test": "node --test",
     "dist": "electron-vite build && electron-builder --mac --arm64",
-    "dist:dir": "electron-vite build && electron-builder --mac --arm64 --dir"
+    "dist:dir": "electron-vite build && electron-builder --mac --arm64 --dir",
+    "postinstall": "codesign --force --deep --sign - node_modules/electron/dist/Electron.app || echo 'postinstall: could not re-sign dev Electron (see scripts/adhoc-sign.cjs)'"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.1",

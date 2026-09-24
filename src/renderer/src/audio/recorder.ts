@@ -12,7 +12,36 @@
 // keeps the graph alive so the meter updates during monitor.
 // =============================================================================
 
-import { encodeWavPCM16 } from '@shared/wav'
+import { encodeWavFromInt16Blocks, toInt16 } from '@shared/wav'
+
+// Samples are stored as Int16 in ~1.4 s blocks (not 128-frame Float32 chunks):
+// half the bytes per sample and ~500× fewer objects, so a long call stays well
+// inside renderer memory and stop() only adds the one WAV buffer on top.
+const BLOCK_FRAMES = 65536
+
+class PcmAccumulator {
+  private blocks: Int16Array[] = []
+  private cur = new Int16Array(BLOCK_FRAMES)
+  private pos = 0
+  frames = 0
+
+  push(frame: Float32Array): void {
+    for (let i = 0; i < frame.length; i++) {
+      if (this.pos === BLOCK_FRAMES) {
+        this.blocks.push(this.cur)
+        this.cur = new Int16Array(BLOCK_FRAMES)
+        this.pos = 0
+      }
+      this.cur[this.pos++] = toInt16(frame[i])
+    }
+    this.frames += frame.length
+  }
+
+  /** All blocks including the partially-filled current one. */
+  finish(): Int16Array[] {
+    return [...this.blocks, this.cur.subarray(0, this.pos)]
+  }
+}
 
 // AudioWorklet processor source, loaded from a Blob URL so we don't depend on
 // the bundler emitting a separately-addressable asset. Each render quantum's
@@ -55,11 +84,16 @@ export class CallRecorder {
   private mutedGain: GainNode | null = null
   private worklet: AudioWorkletNode | null = null
   private analysers: AnalyserNode[] = []
-  private chunks: Float32Array[][] = []
+  private pcm: PcmAccumulator[] = []
   private channels = 1
+  // Bumped by every monitor()/teardown(); an older monitor() that resumes after
+  // its awaits sees a stale generation and releases what it opened instead of
+  // orphaning a live mic stream (rapid device switches, stop-then-navigate).
+  private generation = 0
   private deviceLabel = ''
   private rafId = 0
   private levelCb: LevelCallback | null = null
+  private endedCb: (() => void) | null = null
 
   /** True only while actively accumulating samples. */
   recording = false
@@ -82,6 +116,11 @@ export class CallRecorder {
     return devices.filter((d) => d.kind === 'audioinput')
   }
 
+  /** Called if the open input disappears (unplugged, taken by another app, permission revoked). */
+  onEnded(cb: () => void): void {
+    this.endedCb = cb
+  }
+
   /** Subscribe to live meter updates (dBFS per channel). */
   onLevel(cb: LevelCallback): void {
     this.levelCb = cb
@@ -89,7 +128,9 @@ export class CallRecorder {
 
   /** Open the device and start the live meter, without recording yet. */
   async monitor(deviceId: string, mode: 'speakerphone' | 'loopback'): Promise<void> {
-    if (this.monitoring || this.ctx) this.teardown()
+    if (this.recording) throw new Error('Cannot switch input while a call is recording.')
+    this.teardown()
+    const gen = ++this.generation
     const wantChannels = mode === 'loopback' ? 2 : 1
 
     const constraints: MediaStreamConstraints = {
@@ -101,8 +142,14 @@ export class CallRecorder {
         autoGainControl: false
       }
     }
-    this.stream = await navigator.mediaDevices.getUserMedia(constraints)
+    const stream = await navigator.mediaDevices.getUserMedia(constraints)
+    if (gen !== this.generation) {
+      stream.getTracks().forEach((t) => t.stop())
+      return
+    }
+    this.stream = stream
     const track = this.stream.getAudioTracks()[0]
+    if (track) track.onended = () => gen === this.generation && this.endedCb?.()
     this.deviceLabel = track?.label || ''
     this.channels = track?.getSettings().channelCount || wantChannels
 
@@ -112,9 +159,13 @@ export class CallRecorder {
     const moduleUrl = URL.createObjectURL(new Blob([WORKLET_SRC], { type: 'application/javascript' }))
     try {
       await this.ctx.audioWorklet.addModule(moduleUrl)
+    } catch (e) {
+      if (gen === this.generation) this.teardown() // never leave a half-open device
+      throw e
     } finally {
       URL.revokeObjectURL(moduleUrl)
     }
+    if (gen !== this.generation) return // torn down (and released) while loading
 
     this.source = this.ctx.createMediaStreamSource(this.stream)
 
@@ -142,13 +193,13 @@ export class CallRecorder {
   /** Begin accumulating samples (call after monitor()). Returns the start time. */
   beginRecording(): number {
     if (!this.ctx || !this.source || !this.mutedGain) return Date.now()
-    this.chunks = Array.from({ length: this.channels }, () => [])
+    this.pcm = Array.from({ length: this.channels }, () => new PcmAccumulator())
     this.worklet = new AudioWorkletNode(this.ctx, 'stone-recorder')
     this.worklet.port.onmessage = (e: MessageEvent): void => {
       if (!this.recording) return
       const frame = e.data as Float32Array[]
-      for (let c = 0; c < frame.length && c < this.chunks.length; c++) {
-        this.chunks[c].push(frame[c])
+      for (let c = 0; c < frame.length && c < this.pcm.length; c++) {
+        this.pcm[c].push(frame[c])
       }
     }
     this.source.connect(this.worklet)
@@ -176,25 +227,40 @@ export class CallRecorder {
     this.rafId = requestAnimationFrame(tick)
   }
 
-  /** Finalize the recording into a WAV and release the device. */
+  /**
+   * Finalize the recording into a WAV and release the device. Exception-safe:
+   * the device is always released and `recording` always cleared, so a failure
+   * here can never leave the recorder stuck "recording" with Record dead.
+   */
   async stop(): Promise<RecordingResult> {
     const sampleRate = this.ctx?.sampleRate ?? 48000
-    const channelData = this.chunks.map((chunkList) => concat(chunkList))
-    this.teardown()
-
-    const wav = encodeWavPCM16(channelData.length ? channelData : [new Float32Array(0)], sampleRate)
-    const frames = channelData[0]?.length ?? 0
-    return {
-      wav,
-      durationSec: frames / sampleRate,
-      sampleRate,
-      channels: channelData.length || 1,
-      deviceLabel: this.deviceLabel
+    const pcm = this.pcm
+    const deviceLabel = this.deviceLabel
+    this.recording = false // stop accepting frames before we read the buffers
+    try {
+      // Channels can differ by a render quantum at the cut; use the shortest.
+      const frames = pcm.length ? Math.min(...pcm.map((p) => p.frames)) : 0
+      const wav = encodeWavFromInt16Blocks(
+        pcm.map((p) => p.finish()),
+        frames,
+        sampleRate
+      )
+      return {
+        wav,
+        durationSec: frames / sampleRate,
+        sampleRate,
+        channels: pcm.length || 1,
+        deviceLabel
+      }
+    } finally {
+      this.pcm = []
+      this.teardown()
     }
   }
 
   /** Stop monitoring/recording and release the device without producing a file. */
   teardown(): void {
+    this.generation++
     this.recording = false
     this.monitoring = false
     if (this.rafId) cancelAnimationFrame(this.rafId)
@@ -228,16 +294,4 @@ export class CallRecorder {
   get channelCount(): number {
     return this.channels
   }
-}
-
-function concat(list: Float32Array[]): Float32Array {
-  let total = 0
-  for (const a of list) total += a.length
-  const out = new Float32Array(total)
-  let off = 0
-  for (const a of list) {
-    out.set(a, off)
-    off += a.length
-  }
-  return out
 }

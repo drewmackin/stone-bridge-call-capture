@@ -32,7 +32,7 @@ The app is built with Node.js.
    ```
    $ npm run dev
    ```
-   The Stone Bridge window opens with **Home** and **Backend** tabs. (Later, you can build a
+   The Stone Bridge window opens with **Record** and **Leads** in the title bar. (Later, you can build a
    double‑click app — see “Make a double‑click app” at the end.)
 
 ---
@@ -42,8 +42,8 @@ The app is built with Node.js.
 The first time you record, macOS asks for microphone permission — click **Allow**.
 
 If you ever miss it: **Apple menu → System Settings → Privacy & Security → Microphone**, and turn on
-the toggle for the app (or for Terminal, if you launched with `npm run dev`). Then click **↻
-refresh** on the Home page.
+the toggle for the app (or for Terminal, if you launched with `npm run dev`). Then click the
+**refresh** button next to the Microphone menu on the Record screen.
 
 ---
 
@@ -52,7 +52,7 @@ refresh** on the Home page.
 This build is set up for **calling on a separate phone, on speakerphone**, with your laptop's
 microphone listening to the room. There is **no extra software to install** for this mode.
 
-1. On the Home page, open the **Input source** dropdown and pick the microphone that best hears the
+1. On the Record screen, open the **Microphone** menu and pick the microphone that best hears the
    room (your built‑in mic, or a USB mic if you have one).
 2. Put your phone on **speaker** and play any audio / talk.
 3. Watch the **level meter**. You must see it move for **both** your voice **and** the caller's
@@ -173,25 +173,24 @@ identity), so there's no sign‑in popup.
 3. Save the file. **Never share `.env` or the `.json` key** — they're your secrets and are excluded
    from version control.
 
-Restart the app (`Ctrl‑C` in Terminal, then `npm run dev`). On the Home page, the **Setup status**
-panel should now show green dots for the parts you configured.
+Restart the app (`Ctrl‑C` in Terminal, then `npm run dev`). The status button at the top right of
+the window should now read **All set** (click it to see each service).
 
 ---
 
 ## 9. Do a 30‑second test call
 
-1. **Home** → pick your input and confirm the meter moves for both voices.
-2. Under **Consent & compliance**, pick the lead's **state**, read the on‑screen line aloud, click
-   **Play audible disclosure** (optional), and tick the **“I notified all parties…”** box. The
-   **Record** button turns gold.
+1. **Record** → pick your microphone and confirm the meter moves for both voices.
+2. Under **Seller's state**, pick the seller's state; the consent rule for that call appears next
+   to it. The **Record** button turns gold and the card says **Ready to record**.
 3. Click **Record**, talk for ~30 seconds (say a fake name, phone, and address out loud so you can
    see them get extracted), then **Stop**.
-4. Watch the status strip move through **Saving → Transcribing → Extracting → Done**. Your audio is
-   saved to disk the instant you stop — before anything else.
-5. Go to **Backend**. Your lead is there, marked **new**. Open it: the transcript is on the left,
-   the extracted fields on the right. Empty fields are marked **“not captured.”** Fix anything,
-   then set status to **Reviewed**.
-6. Click **Push to Sheet** (or **Push all approved →** from the list). The first push creates and
+4. Watch the panel under the call card: **Saved to disk → Transcribe → Pull out lead details →
+   Lead ready to review**. Your audio is saved to disk the instant you stop — before anything else.
+5. Click **Review lead** (or go to **Leads → To review**). The transcript is on the left, the
+   extracted fields on the right. Empty fields are marked **“not captured.”** Fix anything, press
+   **Save changes** (⌘S), then **Approve**.
+6. Click **Push to Sheet** (or **Push approved** from the Leads list). The first push creates and
    shares the sheet (check your Drive / the printed URL). Push again — the same row updates; no
    duplicate appears.
 
@@ -202,14 +201,14 @@ That's the whole chain working. 🎉
 ## 10. Troubleshooting
 
 **The recording is silent / one voice is missing.**
-The input device is wrong. On Home, play audio and watch the meter — select the device whose meter
+The input device is wrong. On Record, play audio and watch the meter — select the device whose meter
 actually moves for *both* voices. Move the phone closer to the mic. (In the optional BlackHole
 setup, also confirm System Output is set to the Multi‑Output device.)
 
 **“Local Whisper sidecar is not built.”**
 You haven't run step 4 yet, or it didn't finish. Run `./scripts/build-sidecar.sh` again and watch
-for errors. Your already‑recorded audio is safe — open the lead in Backend and use **Retry** after
-the build succeeds.
+for errors. Your already‑recorded audio is safe — open the lead in Leads and press **Transcribe**
+above its transcript after the build succeeds.
 
 **Transcription fails or times out.**
 Try the smaller model: set `WHISPER_MODEL=base` in `.env` and retry. The audio is never lost.
@@ -225,11 +224,11 @@ absolute path.
 
 **Extraction says it needs review / fields are blank.**
 Either `ANTHROPIC_API_KEY` is missing/invalid, or the model wasn't confident. The transcript is
-always kept — read it in Backend and fill the fields yourself. The app never invents data.
+always kept — read it on the lead’s page and fill the fields yourself. The app never invents data.
 
 **Microphone is blocked.**
-System Settings → Privacy & Security → Microphone → enable the app (or Terminal), then click
-**↻ refresh** on Home.
+System Settings → Privacy & Security → Microphone → enable the app (or Terminal), then click the
+**refresh** button next to the Microphone menu on Record.
 
 ---
 

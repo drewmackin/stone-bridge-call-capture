@@ -56,6 +56,59 @@ export function encodeWavPCM16(channelData: ArrayLike<number>[], sampleRate: num
   return buffer
 }
 
+/**
+ * Encode PCM16 WAV straight from per-channel lists of Int16 blocks (the
+ * recorder's native storage), interleaving into the one output buffer — no
+ * intermediate full-length Float32 copies, so peak memory stays ~2× the audio.
+ * `frames` is the per-channel sample count actually written into the blocks.
+ */
+export function encodeWavFromInt16Blocks(
+  blocks: Int16Array[][],
+  frames: number,
+  sampleRate: number
+): ArrayBuffer {
+  const channels = Math.max(1, blocks.length)
+  const blockAlign = channels * 2
+  const dataSize = frames * blockAlign
+  const buffer = new ArrayBuffer(44 + dataSize)
+  const view = new DataView(buffer)
+  const writeStr = (offset: number, str: string): void => {
+    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i))
+  }
+  writeStr(0, 'RIFF')
+  view.setUint32(4, 36 + dataSize, true)
+  writeStr(8, 'WAVE')
+  writeStr(12, 'fmt ')
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)
+  view.setUint16(22, channels, true)
+  view.setUint32(24, sampleRate, true)
+  view.setUint32(28, sampleRate * blockAlign, true)
+  view.setUint16(32, blockAlign, true)
+  view.setUint16(34, 16, true)
+  writeStr(36, 'data')
+  view.setUint32(40, dataSize, true)
+
+  // Typed arrays use host byte order; every supported Mac (arm64/x64) is
+  // little-endian, which is what WAV requires.
+  const out = new Int16Array(buffer, 44, frames * channels)
+  for (let c = 0; c < channels; c++) {
+    let f = 0
+    for (const block of blocks[c] ?? []) {
+      const n = Math.min(block.length, frames - f)
+      for (let i = 0; i < n; i++) out[(f + i) * channels + c] = block[i]
+      f += n
+      if (f >= frames) break
+    }
+  }
+  return buffer
+}
+
+/** Float sample → Int16 with the same clamping/scaling as encodeWavPCM16. */
+export function toInt16(sample: number): number {
+  return floatToInt16(sample) | 0
+}
+
 export interface WavHeader {
   valid: boolean
   channels: number

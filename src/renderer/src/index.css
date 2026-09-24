@@ -2,8 +2,59 @@
 @tailwind components;
 @tailwind utilities;
 
+/* =============================================================================
+   Design tokens — one OKLCH palette in four layers: warm-neutral foundation →
+   gold accent ramp (brand gold = 600, 700 = hover) → semantic (red destructive,
+   green success, amber warning) → theming via these variables. Contrast of
+   every text/background pair was checked to WCAG AA (≥ 4.5:1 for small text).
+   8pt spacing grid, one 10px radius, system font, restrained shadows.
+   ============================================================================= */
 :root {
   color-scheme: light;
+
+  /* 1 · Foundation */
+  --canvas: 0.972 0.006 85; /* #f8f5f1 page */
+  --surface: 0.993 0.003 85; /* #fefdfa cards */
+  --sunken: 0.955 0.008 85; /* #f3f0ea wells, table heads */
+  --line: 0.905 0.01 85; /* hairlines */
+  --line-strong: 0.85 0.012 85; /* input borders */
+  --ink: 0.235 0.035 262; /* primary text 16.4:1 */
+  --ink-2: 0.42 0.028 262; /* secondary text 8.3:1 */
+  --ink-3: 0.515 0.02 262; /* tertiary text 5.5:1 — the lightest text allowed */
+
+  /* Brand chrome */
+  --navy: 0.19 0.045 262; /* #081328 */
+  --navy-2: 0.255 0.05 262;
+  --navy-3: 0.32 0.05 262;
+
+  /* 2 · Accent ramp */
+  --gold-50: 0.975 0.012 85;
+  --gold-100: 0.948 0.024 85;
+  --gold-200: 0.9 0.04 84;
+  --gold-300: 0.845 0.055 83;
+  --gold-400: 0.795 0.066 82;
+  --gold-500: 0.745 0.074 81;
+  --gold-600: 0.7 0.078 80; /* brand gold — primary (navy text 6.9:1) */
+  --gold-700: 0.64 0.078 79; /* hover (navy text 5.5:1) */
+  --gold-800: 0.49 0.068 76; /* gold text on light surfaces 6.2:1 */
+  --gold-900: 0.4 0.055 75;
+
+  /* 3 · Semantic */
+  --ok: 0.47 0.11 155;
+  --ok-bg: 0.955 0.035 155;
+  --ok-dot: 0.66 0.15 155;
+  --warn: 0.48 0.1 65;
+  --warn-bg: 0.962 0.04 85;
+  --warn-dot: 0.75 0.14 75;
+  --danger: 0.5 0.17 27;
+  --danger-bg: 0.96 0.02 27;
+  --danger-solid: 0.53 0.19 27; /* white text 5.8:1 */
+  --info: 0.47 0.12 255;
+  --info-bg: 0.955 0.025 255;
+  --rec: 0.58 0.21 27; /* recording red (white text 4.8:1) */
+
+  --toolbar-h: 52px;
+  --footer-h: 30px;
 }
 
 html,
@@ -14,49 +65,155 @@ body,
 }
 
 body {
-  background: #f7f5f0;
-  color: #091428;
-  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  background: oklch(var(--canvas));
+  color: oklch(var(--ink));
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+  font-size: 13px; /* dense desktop body size */
+  line-height: 1.45;
   -webkit-font-smoothing: antialiased;
+  font-feature-settings: 'tnum' 0;
+}
+
+/* Visible focus for keyboard users only — never removed, never on mouse click. */
+:focus-visible {
+  outline: 2px solid oklch(var(--gold-800));
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* On the navy title bar the ring flips to light gold so it stays visible. */
+.material-toolbar :focus-visible {
+  outline-color: oklch(var(--gold-400));
 }
 
 @layer components {
-  /* Gold hairline rule used to separate premium surfaces. */
-  .rule-gold {
-    @apply border-gold/40;
+  /* ---- Type ---------------------------------------------------------------- */
+  .t-title {
+    @apply text-[22px] font-semibold leading-tight tracking-[-0.015em] text-ink;
+  }
+  .t-heading {
+    @apply text-[15px] font-semibold leading-snug tracking-[-0.01em] text-ink;
+  }
+  .t-label {
+    @apply text-[11px] font-semibold uppercase leading-none tracking-[0.06em] text-ink-2;
+  }
+  .t-meta {
+    @apply text-[12px] leading-snug text-ink-3;
   }
 
-  .btn-gold {
-    @apply inline-flex items-center justify-center gap-2 rounded-md bg-gold px-4 py-2 font-medium text-navy
-           shadow-sm transition hover:bg-gold-400 active:bg-gold-600
-           disabled:cursor-not-allowed disabled:opacity-40;
+  /* ---- Surfaces ------------------------------------------------------------ */
+  .card {
+    @apply rounded-card border border-line bg-surface shadow-card;
   }
 
-  .btn-ghost {
-    @apply inline-flex items-center justify-center gap-2 rounded-md border border-navy/15 px-3 py-1.5
-           text-sm text-navy transition hover:border-gold hover:text-navy-700
-           disabled:cursor-not-allowed disabled:opacity-40;
+  /* ---- Buttons: default · hover · active · disabled (+ focus-visible) ------- */
+  .btn {
+    @apply inline-flex h-8 shrink-0 select-none items-center justify-center gap-1.5 whitespace-nowrap rounded px-3
+           text-[13px] font-medium transition-[background-color,border-color,color,transform,opacity] duration-150 ease-spring
+           active:scale-[0.97] disabled:pointer-events-none disabled:opacity-45;
+  }
+  .btn-primary {
+    @apply btn bg-gold-600 text-navy shadow-sm hover:bg-gold-700 active:bg-gold-700;
+  }
+  .btn-secondary {
+    @apply btn border border-line-strong bg-surface text-ink hover:border-ink-3/50 hover:bg-sunken active:bg-sunken;
+  }
+  .btn-quiet {
+    @apply btn text-ink-2 hover:bg-ink/[0.06] hover:text-ink active:bg-ink/[0.09];
+  }
+  .btn-danger {
+    @apply btn bg-danger-solid text-white hover:bg-danger active:bg-danger;
+  }
+  .btn-danger-quiet {
+    @apply btn border border-danger/30 bg-surface text-danger hover:bg-danger-bg active:bg-danger-bg;
+  }
+  .btn-sm {
+    @apply h-7 px-2.5 text-[12px];
+  }
+  .btn-lg {
+    @apply h-9 px-4 text-[13px];
+  }
+  .btn-icon {
+    @apply btn h-8 w-8 px-0 text-ink-2 hover:bg-ink/[0.06] hover:text-ink;
   }
 
-  .panel {
-    @apply rounded-xl border border-navy/10 bg-white shadow-panel;
-  }
-
-  .panel-heading {
-    @apply font-display text-2xl font-semibold tracking-tight text-navy;
-  }
-
-  .field-label {
-    @apply text-xs font-medium uppercase tracking-wide text-navy/50;
-  }
-
+  /* ---- Inputs --------------------------------------------------------------- */
   .input {
-    @apply w-full rounded-md border border-navy/15 bg-white px-3 py-2 text-sm text-navy
-           outline-none transition focus:border-gold focus:ring-2 focus:ring-gold/30;
+    @apply h-9 w-full rounded border border-line-strong bg-surface px-3 text-[13px] text-ink
+           outline-none transition-[border-color,box-shadow] duration-150 placeholder:text-ink-3
+           focus:border-gold-800 focus:ring-2 focus:ring-gold-600/35
+           disabled:cursor-not-allowed disabled:bg-sunken disabled:text-ink-3;
+  }
+  textarea.input {
+    @apply h-auto min-h-[76px] resize-y py-2 leading-relaxed;
+  }
+  select.input {
+    @apply cursor-pointer appearance-none bg-no-repeat pr-8;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%235a6170' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E");
+    background-position: right 10px center;
+    background-size: 14px;
   }
 
-  /* "Not captured" markers for empty extracted fields. */
-  .not-captured {
-    @apply italic text-navy/35;
+  /* ---- Badges ---------------------------------------------------------------- */
+  .badge {
+    @apply inline-flex h-[22px] shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2 text-[11px] font-semibold leading-none;
   }
+
+  /* Empty-field marker — always paired with the word, never color alone. */
+  .not-captured {
+    @apply italic text-ink-3;
+  }
+}
+
+/* Motion serves clarity only; honor the user's reduced-motion setting. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Translucent chrome falls back to solid when transparency is reduced. */
+@media (prefers-reduced-transparency: reduce) {
+  .material {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  .material-toolbar {
+    background: oklch(var(--navy)) !important;
+  }
+  .material-footer {
+    background: oklch(var(--surface)) !important;
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+.anim-pop {
+  animation: pop-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.anim-rise {
+  animation: rise-in 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.anim-fade {
+  animation: fade-in 160ms ease-out;
 }

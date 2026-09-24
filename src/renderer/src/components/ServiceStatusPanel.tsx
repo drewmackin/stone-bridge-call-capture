@@ -1,38 +1,59 @@
 import type { AppReadiness, ServiceStatus } from '@shared/types'
+import { AlertIcon, CheckCircleIcon } from './icons'
 
-function Dot({ ok, configured }: { ok: boolean; configured: boolean }): JSX.Element {
-  const color = ok ? 'bg-emerald-500' : configured ? 'bg-amber-500' : 'bg-navy/25'
-  return <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${color}`} />
+type Key = 'transcription' | 'anthropic' | 'sheets' | 'calendar' | 'diarization'
+
+// Ordered by what the next call depends on first.
+const SERVICES: { key: Key; name: string; optional?: boolean }[] = [
+  { key: 'transcription', name: 'Transcription' },
+  { key: 'anthropic', name: 'AI lead extraction' },
+  { key: 'sheets', name: 'Google Sheets' },
+  { key: 'calendar', name: 'Google Calendar follow-ups' },
+  { key: 'diarization', name: 'Speaker labels', optional: true }
+]
+
+/** Needs attention = a required service that isn't working. Optional ones never count. */
+export function setupIssues(r: AppReadiness): number {
+  return SERVICES.filter((s) => !s.optional && !r[s.key].ok).length
 }
 
-function Row({ name, s }: { name: string; s: ServiceStatus }): JSX.Element {
+function Row({ name, s, optional }: { name: string; s: ServiceStatus; optional?: boolean }): JSX.Element {
   return (
-    <div className="flex items-start gap-3 py-2">
-      <Dot ok={s.ok} configured={s.configured} />
+    <li className="flex items-start gap-2.5 py-2">
+      {s.ok ? (
+        <CheckCircleIcon className="mt-px h-4 w-4 shrink-0 text-ok" />
+      ) : optional && !s.configured ? (
+        <span className="mt-[5px] h-1.5 w-4 shrink-0 rounded-full bg-line-strong" aria-hidden="true" />
+      ) : (
+        <AlertIcon className="mt-px h-4 w-4 shrink-0 text-warn" />
+      )}
       <div className="min-w-0">
-        <div className="text-sm font-medium text-navy">{name}</div>
-        <div className="text-xs leading-snug text-navy/55">{s.detail}</div>
+        <div className="text-[13px] font-medium text-ink">
+          {name}
+          <span className="sr-only">
+            {s.ok ? ' — working' : optional && !s.configured ? ' — optional, off' : ' — needs setup'}
+          </span>
+          {optional && <span className="ml-1.5 text-[11px] font-normal text-ink-3">optional</span>}
+        </div>
+        <div className="text-[12px] leading-snug text-ink-2">{s.detail}</div>
       </div>
-    </div>
+    </li>
   )
 }
 
-export default function ServiceStatusPanel({ readiness }: { readiness: AppReadiness }): JSX.Element {
+export default function ServiceStatusPanel({
+  readiness,
+  onlyProblems = false
+}: {
+  readiness: AppReadiness
+  onlyProblems?: boolean
+}): JSX.Element {
+  const rows = SERVICES.filter((s) => !onlyProblems || (!s.optional && !readiness[s.key].ok))
   return (
-    <div className="panel p-5">
-      <div className="mb-2 flex items-baseline justify-between">
-        <h2 className="panel-heading text-xl">Setup status</h2>
-        <span className="text-xs uppercase tracking-wide text-navy/40">
-          {readiness.operatorState} · {readiness.audioMode}
-        </span>
-      </div>
-      <div className="divide-y divide-navy/5">
-        <Row name="AI extraction (Anthropic)" s={readiness.anthropic} />
-        <Row name="Transcription" s={readiness.transcription} />
-        <Row name="Speaker labels (diarization)" s={readiness.diarization} />
-        <Row name="Google Sheets push" s={readiness.sheets} />
-        <Row name="Google Calendar follow-ups" s={readiness.calendar} />
-      </div>
-    </div>
+    <ul className="divide-y divide-line">
+      {rows.map((s) => (
+        <Row key={s.key} name={s.name} s={readiness[s.key]} optional={s.optional} />
+      ))}
+    </ul>
   )
 }

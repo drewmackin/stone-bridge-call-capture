@@ -6,12 +6,14 @@
 // (diarization) are best-effort: present only if a Hugging Face token is
 // configured and pyannote is available — otherwise the full transcript is still
 // returned, unlabeled. The Hugging Face token is passed via the child ENV, never
-// argv, so it can't leak into the process table.
+// argv, so it can't leak into the process table — and the child gets a MINIMAL
+// env, so the app's own API keys (Anthropic, AssemblyAI, Google) never reach it.
 // =============================================================================
 
-import { execFile } from 'child_process'
-import { existsSync } from 'fs'
+import { execFile, type ChildProcess } from 'child_process'
+import { closeSync, existsSync, openSync, readSync, statSync } from 'fs'
 import type { TranscriptionResult } from '@shared/types'
+import { parseWavHeader } from '@shared/wav'
 import { getConfig, hasSecret } from '../config'
 import { sidecarPath } from '../readiness'
 import { type Transcriber, type TranscribeOptions, TranscriptionError } from './Transcriber'
@@ -21,6 +23,87 @@ interface SidecarOutput {
   segments?: { speaker?: string; text: string; start_ms?: number; end_ms?: number }[]
   speaker_labeled?: boolean
   error?: string
+}
+
+/** Live sidecar processes, so quitting the app can't orphan a mid-inference one. */
+const running = new Set<ChildProcess>()
+
+/** SIGKILL every running sidecar (called on app quit). */
+export function killAllTranscribers(): void {
+  for (const child of running) {
+    try {
+      child.kill('SIGKILL')
+    } catch {
+      /* already gone */
+    }
+  }
+  running.clear()
+}
+
+const MIN_TIMEOUT_MS = 20 * 60 * 1000
+
+/**
+ * Scale the timeout with the recording: max(20 min, duration × channels × 3).
+ * Stereo is transcribed per channel, and CPU inference on a long call can take
+ * longer than real time. Falls back to the file size if the header's data size
+ * is unset (e.g. a WAV finalized by a crash-recovery path).
+ */
+export function timeoutForWav(audioPath: string): number {
+  try {
+    const fd = openSync(audioPath, 'r')
+    const buf = Buffer.alloc(44)
+    try {
+      readSync(fd, buf, 0, 44, 0)
+    } finally {
+      closeSync(fd)
+    }
+    const h = parseWavHeader(buf.buffer.slice(buf.byteOffset, buf.byteOffset + 44))
+    if (!h.valid || !h.sampleRate || !h.channels || !h.bitsPerSample) return MIN_TIMEOUT_MS
+    const bytesPerSec = (h.sampleRate * h.channels * h.bitsPerSample) / 8
+    const fileData = Math.max(0, statSync(audioPath).size - 44)
+    const dataBytes = h.dataBytes > 0 && h.dataBytes <= fileData ? h.dataBytes : fileData
+    const durationSec = dataBytes / bytesPerSec
+    return Math.max(MIN_TIMEOUT_MS, Math.ceil(durationSec * h.channels * 3 * 1000))
+  } catch {
+    return MIN_TIMEOUT_MS
+  }
+}
+
+/** Only what the sidecar (Python + faster-whisper + huggingface_hub) needs. */
+const ENV_KEYS = [
+  'PATH', 'HOME', 'USER', 'LOGNAME', 'TMPDIR', 'LANG', 'LC_ALL', 'LC_CTYPE',
+  'XDG_CACHE_HOME', 'SSL_CERT_FILE', 'REQUESTS_CA_BUNDLE',
+  // first-run model download behind a proxy
+  'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'no_proxy',
+  'OMP_NUM_THREADS'
+]
+// HF_HOME / HF_HUB_CACHE / HF_HUB_OFFLINE / HF_TOKEN…, CTranslate2 tuning.
+const ENV_PREFIXES = ['HF_', 'HUGGINGFACE_', 'CT2_']
+
+function sidecarEnv(hfToken: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {}
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v !== undefined && (ENV_KEYS.includes(k) || ENV_PREFIXES.some((p) => k.startsWith(p)))) env[k] = v
+  }
+  // Dev/test: a python script run from a venv may rely on PYTHONPATH.
+  if (process.env.STONE_WHISPER_SCRIPT && process.env.PYTHONPATH) env.PYTHONPATH = process.env.PYTHONPATH
+  if (hfToken) env.HUGGINGFACE_TOKEN = hfToken // transcribe.py reads this for --diarize
+  return env
+}
+
+/** The sidecar's own fatal-error report: {"error": "..."} on stdout. */
+function sidecarError(stdout: string): string {
+  // Whole stdout first, then its last line (in case a library printed first).
+  const lines = stdout.trim().split('\n')
+  for (const candidate of [stdout.trim(), lines[lines.length - 1]]) {
+    try {
+      const parsed = JSON.parse(candidate) as SidecarOutput
+      if (typeof parsed.error === 'string' && parsed.error) return parsed.error
+    } catch {
+      /* not JSON — try the next candidate */
+    }
+  }
+  return ''
 }
 
 /** Resolve how to launch the sidecar (built binary, or a python script in dev/test). */
@@ -74,33 +157,47 @@ export class LocalWhisperTranscriber implements Transcriber {
     // Mono fallback: best-effort diarization when a Hugging Face token is set.
     if (diarize) args.push('--diarize')
 
-    const childEnv = { ...process.env }
-    if (diarize) childEnv.HUGGINGFACE_TOKEN = cfg.huggingFaceToken
+    const childEnv = sidecarEnv(diarize ? cfg.huggingFaceToken : '')
+    const timeout = timeoutForWav(audioPath)
 
     return new Promise<TranscriptionResult>((resolve, reject) => {
-      execFile(
+      const child = execFile(
         cmd,
         args,
         {
           env: childEnv,
-          timeout: 20 * 60 * 1000,
+          timeout,
           maxBuffer: 64 * 1024 * 1024,
           // The ML sidecar may ignore SIGTERM mid-inference; force-kill so a
           // timeout/overflow can't leave an orphaned process holding CPU/RAM.
           killSignal: 'SIGKILL'
         },
         (err, stdout, stderr) => {
+          running.delete(child)
           if (err) {
-            const tail = (stderr || err.message || '').toString().trim().slice(-500)
-            const timedOut = (err as NodeJS.ErrnoException & { killed?: boolean }).killed
-            return reject(
-              new TranscriptionError(
-                timedOut
-                  ? 'Transcription timed out. Your audio is saved — try again or use a smaller model.'
-                  : `Transcription failed: ${tail || 'sidecar error'}`,
-                true
+            const e = err as NodeJS.ErrnoException & { killed?: boolean }
+            // Node kills the child on overflow too, so check overflow BEFORE "killed".
+            if (e.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' || /maxBuffer/i.test(e.message)) {
+              return reject(
+                new TranscriptionError(
+                  'Transcription output was too large to read. Your audio is saved; please retry.',
+                  true
+                )
               )
-            )
+            }
+            if (e.killed) {
+              return reject(
+                new TranscriptionError(
+                  'Transcription timed out. Your audio is saved — try again or use a smaller model.',
+                  true
+                )
+              )
+            }
+            // Prefer the sidecar's own {"error": ...} report; stderr is mostly logs.
+            const reason =
+              sidecarError(stdout.toString()) ||
+              (stderr || err.message || '').toString().trim().slice(-500)
+            return reject(new TranscriptionError(`Transcription failed: ${reason || 'sidecar error'}`, true))
           }
           let parsed: SidecarOutput
           try {
@@ -130,6 +227,7 @@ export class LocalWhisperTranscriber implements Transcriber {
           })
         }
       )
+      running.add(child)
     })
   }
 }

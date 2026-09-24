@@ -9,6 +9,8 @@ import type { AppReadiness, ServiceStatus } from '@shared/types'
 import { getConfig, hasSecret } from './config'
 import { getPaths } from './paths'
 import { resolveResource } from './resources'
+import { getSetting } from './db/settings'
+import { SETTING_SHEET_ID } from './sheets/sync'
 
 function svc(configured: boolean, detail: string, ok = configured): ServiceStatus {
   return { configured, ok, detail }
@@ -52,19 +54,25 @@ export function computeReadiness(): AppReadiness {
   } else if (!existsSync(cfg.googleServiceAccountKeyPath)) {
     sheets = svc(false, `Service-account key file not found at the configured path.`)
   } else {
+    // The app remembers the Sheet it created on the first push (settings table).
     sheets = svc(
       true,
       cfg.googleSheetId
         ? 'Service account configured; using the provided Sheet ID.'
-        : 'Service account configured; a new Sheet will be created on first push.'
+        : getSetting(SETTING_SHEET_ID)
+          ? 'Service account configured; pushing to the Sheet the app created earlier.'
+          : 'Service account configured; a new Sheet will be created on first push.'
     )
   }
 
   // Calendar shares the service-account credential with Sheets; it also needs
-  // the Calendar API enabled and the calendar shared with the SA at runtime.
-  const calendar = sheets.configured
-    ? svc(true, `Will file follow-up events on ${cfg.calendarId || 'your calendar'} when a lead has a meeting time.`)
-    : svc(false, 'Needs the Google service account (same as Sheets) + Calendar API enabled + your calendar shared with the service-account email.')
+  // a target calendar id, the Calendar API enabled and the calendar shared
+  // with the SA at runtime.
+  const calendar = !sheets.configured
+    ? svc(false, 'Needs the Google service account (same as Sheets) + Calendar API enabled + your calendar shared with the service-account email.')
+    : cfg.calendarId
+      ? svc(true, `Will file follow-up events on ${cfg.calendarId} when a lead has a meeting time.`)
+      : svc(false, 'No calendar set — add CALENDAR_ID (or OPERATOR_SHARE_EMAIL) to .env to file follow-up events.')
 
   return {
     anthropic,

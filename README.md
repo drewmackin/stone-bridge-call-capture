@@ -2,7 +2,7 @@
 
 A desktop app for Stone Bridge Strategic Partners that records seller phone calls,
 transcribes them **locally** (audio never leaves the Mac), uses AI to extract structured lead
-data, lets the operator review/correct each lead in a staging "Backend," and pushes approved
+data, lets the operator review/correct each lead on the Leads screen, and pushes approved
 leads to a Google Sheet — one idempotent row per lead.
 
 > **New here? You want [SETUP.md](SETUP.md)** — a numbered, copy‑paste guide that takes you from
@@ -13,25 +13,25 @@ leads to a Google Sheet — one idempotent row per lead.
 ## What it does (the pipeline)
 
 ```
-Home page                                   Main process (Node)                 External
+Record screen                               Main process (Node)                 External
 ─────────                                   ───────────────────                 ────────
 pick input + see live meter ── IPC ──►  fs write RAW WAV  ◄── SACRED: disk before anything else
-pass consent gate · Record/Stop ─┘           │
+seller’s state + rule · Record/Stop ─┘       │
                                              ├─► transcribe (local faster‑whisper sidecar)
                                              ├─► extract  (Anthropic Claude, forced tool use)
                                              ├─► SQLite (better‑sqlite3)  ◄── system of record
                                              └─► Google Sheets (service account, idempotent)
-Backend page (review / edit / push) ◄────────┘
+Leads screen (review / approve / push) ◄─────┘
 ```
 
-1. **Capture** — select an input device, confirm both voices register on the live meter, pass the
-   consent gate, and record. The moment you stop, **the raw WAV is written to disk before any
+1. **Capture** — select an input device, confirm both voices register on the live meter, set the
+   seller's state (the consent rule is shown and logged), and record. The moment you stop, **the raw WAV is written to disk before any
    transcription or network call**, so a later failure can never destroy a recording.
 2. **Transcribe** — a local faster‑whisper sidecar produces the transcript on your machine.
    Speaker labels are best‑effort (see Diarization below).
 3. **Extract** — the transcript goes to the Anthropic API, which returns strict structured fields.
    Unknown fields are left **empty** — never invented.
-4. **Review** — the lead lands in the Backend marked `new`, with the transcript and the extracted
+4. **Review** — the lead lands in Leads → To review, with the transcript and the extracted
    fields side by side so you can correct anything before it leaves your machine.
 5. **Push** — approved leads go to a Google Sheet, one row per lead, keyed by a record id so
    re‑pushing **updates in place instead of duplicating**.
@@ -87,7 +87,7 @@ src/main/            Electron main: config, paths, db, transcription, extraction
   sheets/            service‑account client + idempotent upsert
   services/          capture (save‑first), pipeline (transcribe→extract), leads, sheets
 src/preload/         contextBridge — the renderer's only door to main
-src/renderer/        React UI: Home (console) + Backend (review), brand theme
+src/renderer/        React UI: Record (call console) + Leads (review/push); OKLCH design tokens in index.css
 src/shared/          types, IPC contract, WAV encoder, compliance copy
 resources/whisper-sidecar/  faster‑whisper sidecar source (transcribe.py)
 scripts/build-sidecar.sh    builds the sidecar into a self‑contained executable
@@ -101,7 +101,14 @@ npm install
 npm run rebuild      # rebuild better-sqlite3 against Electron's ABI (once)
 npm run dev          # launch with hot reload
 npm run typecheck    # strict TypeScript across main + renderer
-npm run verify       # build + run the headless self-test suite (below)
+npm run verify       # build + run the headless self-test suite (below) on a throwaway profile
+```
+
+**UI harness (no Electron, no data):** the real renderer in a browser with a mock backend and a
+synthetic microphone — for design work and screenshots. Scenarios via `?s=default|empty|setup|nomic|fail`.
+
+```bash
+node_modules/.bin/vite --config design/harness/vite.config.mts   # → http://localhost:8030/?s=default
 ```
 
 ### Built‑in self‑tests (no GUI, no secrets needed)
@@ -117,7 +124,8 @@ The app can verify its own critical paths headlessly:
 | `electron . --selftest-backend` | add / edit / search / soft‑delete / restore / permanent‑delete |
 | `electron . --selftest-sheets` | idempotent upsert row‑finding + summary‑only row mapping |
 
-`npm run verify` runs all of them and reports PASS/FAIL.
+`npm run verify` runs all of them and reports PASS/FAIL. Each run uses a temporary
+`--user-data-dir`, so it never touches the real leads database or its `.env`.
 
 ## Package (macOS arm64)
 
@@ -126,11 +134,13 @@ The app can verify its own critical paths headlessly:
 npm run dist                 # produces dist/Stone Bridge Call Capture-<v>-arm64.dmg
 ```
 
-> **Signing/notarization:** `electron-builder.yml` is set up for a hardened‑runtime mac build with
-> a microphone‑usage entitlement. Producing a *notarized* `.dmg` requires an Apple Developer ID
-> (set `CSC_*` env vars). Without one you can still build an unsigned app with
-> `CSC_IDENTITY_AUTODISCOVERY=false npm run dist:dir` for local use (Gatekeeper will ask you to
-> right‑click → Open the first time).
+> **Signing:** without an Apple Developer ID the build is **ad‑hoc signed** by
+> `scripts/adhoc-sign.cjs` (an electron-builder `afterPack` hook). That step is required: Apple has
+> revoked the fingerprint (cdhash) of Electron's stock unsigned binary, and macOS deletes any app
+> that ships it unchanged as "malware". The same fix runs on `node_modules`' dev Electron via
+> `postinstall`. Hardened runtime stays **off** (it would silently block the mic under an ad‑hoc
+> signature). macOS asks for microphone permission once after each rebuild. A notarized `.dmg`
+> needs a Developer ID (`CSC_*` env vars) plus hardened runtime turned back on.
 
 ## Security & data integrity guardrails
 

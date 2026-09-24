@@ -13,6 +13,7 @@ import type { CallAnalysis, Lead } from '@shared/types'
 import { getConfig, hasSecret } from '../config'
 import { getLead, updateLead } from '../db/leads'
 import { errMsg } from '@shared/errors'
+import { isRetryableApiError } from './extractLead'
 
 const HAIKU = 'claude-haiku-4-5-20251001'
 const SONNET = 'claude-sonnet-4-6'
@@ -119,7 +120,8 @@ export async function scoreCall(transcript: string): Promise<CallAnalysis> {
     } catch (e) {
       const status = (e as { status?: number })?.status
       if (status === 401 || status === 403) throw new ScoreError(`Call grading auth failed: ${errMsg(e)}`, false)
-      lastErr = { message: `Call grading request failed: ${errMsg(e)}`, retryable: true }
+      // Only 408/409/429/5xx + connection failures are worth a retry.
+      lastErr = { message: `Call grading request failed: ${errMsg(e)}`, retryable: isRetryableApiError(e) }
       continue
     }
     if (!input) continue

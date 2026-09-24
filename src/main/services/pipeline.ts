@@ -18,12 +18,23 @@ import { extractLead, ExtractionError } from '../extraction/extractLead'
 import { scoreCall } from '../extraction/scoreCall'
 
 let win: BrowserWindow | null = null
-export function setPipelineWindow(w: BrowserWindow): void {
+export function setPipelineWindow(w: BrowserWindow | null): void {
   win = w
 }
 
+/**
+ * Progress is advisory: the operator may close the window mid-pipeline, and a
+ * send to a destroyed window throws — which must never abort transcription or
+ * extraction of a recording that is already on disk.
+ */
 function emit(p: PipelineProgress): void {
-  win?.webContents.send(IPC.PIPELINE_PROGRESS, p)
+  try {
+    if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) {
+      win.webContents.send(IPC.PIPELINE_PROGRESS, p)
+    }
+  } catch {
+    /* window went away between the check and the send — keep processing */
+  }
 }
 
 function progress(
@@ -75,10 +86,16 @@ export async function processRecordingCore(leadId: string): Promise<Lead> {
   }
 
   // --- Transcription ---
-  progress(leadId, 'transcribing', 'Transcribing the call locally…', safe)
+  const transcriber = getTranscriber()
+  progress(
+    leadId,
+    'transcribing',
+    transcriber.engine === 'local-whisper' ? 'Transcribing the call locally…' : 'Transcribing the call…',
+    safe
+  )
   let result: TranscriptionResult
   try {
-    result = await getTranscriber().transcribe({ audioPath: lead.audio_path })
+    result = await transcriber.transcribe({ audioPath: lead.audio_path })
   } catch (e) {
     const retryable = e instanceof TranscriptionError ? e.retryable : true
     const message = e instanceof Error ? e.message : String(e)
@@ -105,15 +122,26 @@ export async function processRecordingCore(leadId: string): Promise<Lead> {
     transcript_path: txtPath
   })
 
+  // Silence / no speech: there is nothing to extract, and sending an empty
+  // transcript to the model only invites invented fields. Flag for review.
+  const heardSpeech = !!result.text.trim() || result.segments.some((s) => s.text.trim())
+  if (!heardSpeech) {
+    updated = updateLead(leadId, { needs_review: true })
+    progress(leadId, 'done', 'No speech was detected — review the recording.', safe)
+    return updated
+  }
+
   // --- Extraction ---
   progress(leadId, 'extracting', 'Extracting lead details with AI…', safe)
   try {
     const outcome = await extractLead(transcriptText, lead.created_at)
     if (outcome.ok) {
+      // A field the model got wrong (bad phone / impossible meeting time) was
+      // blanked rather than discarding everything — the operator must check it.
       updated = updateLead(leadId, {
         ...outcome.fields,
         raw_extraction: outcome.raw,
-        needs_review: false
+        needs_review: outcome.blanked.length > 0
       })
       // Grade the call against wholesaling best practices — best-effort; never
       // blocks the pipeline (the scorecard is a coaching nice-to-have).
@@ -147,9 +175,11 @@ export async function processRecordingCore(leadId: string): Promise<Lead> {
   progress(
     leadId,
     'done',
-    result.speaker_labeled
-      ? 'Lead captured (speaker-labeled transcript) — ready to review.'
-      : 'Lead captured (speaker labels unavailable) — ready to review.',
+    updated.needs_review
+      ? 'Lead captured — some details could not be read cleanly and were left blank. Please review.'
+      : result.speaker_labeled
+        ? 'Lead captured (speaker-labeled transcript) — ready to review.'
+        : 'Lead captured (speaker labels unavailable) — ready to review.',
     safe
   )
   return updated

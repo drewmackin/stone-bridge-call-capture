@@ -19,6 +19,10 @@ extraResources:
 
 asar: true
 
+# Ad-hoc re-sign so the app's cdhash is unique — the stock unsigned Electron binary's
+# cdhash is revoked by Apple and macOS trashes the app as "malware". See the script.
+afterPack: scripts/adhoc-sign.cjs
+
 mac:
   category: public.app-category.business
   target:

@@ -8,7 +8,9 @@
 // all bookkeeping the app needs are written to hidden columns to the RIGHT of
 // their layout (I onward) so their view stays clean and readable. Never the full
 // transcript. The target tab is resolved at runtime (a "Leads" tab if present,
-// else the first tab) so the operator doesn't have to rename anything.
+// else the first tab) so the operator doesn't have to rename anything; once
+// resolved it is remembered by its numeric sheetId, so renaming or reordering
+// tabs later doesn't send rows somewhere else.
 // =============================================================================
 
 import { basename } from 'path'
@@ -111,7 +113,8 @@ export function rowFromA1Range(range: string | null | undefined): number {
   return m ? parseInt(m[1], 10) : -1
 }
 
-const SETTING_SHEET_ID = 'google_sheet_id'
+/** Settings key holding the id of the spreadsheet the app created (see createSpreadsheet). */
+export const SETTING_SHEET_ID = 'google_sheet_id'
 
 function configuredSheetId(): string {
   const cfg = getConfig()
@@ -121,14 +124,17 @@ function configuredSheetId(): string {
 async function createSpreadsheet(): Promise<string> {
   const { sheets, drive } = getGoogleClients()
   const cfg = getConfig()
-  const res = await withRetry(() =>
-    sheets.spreadsheets.create({
-      requestBody: {
-        properties: { title: 'Stone Bridge — Captured Leads' },
-        sheets: [{ properties: { title: PREFERRED_TAB } }]
-      },
-      fields: 'spreadsheetId,spreadsheetUrl'
-    })
+  // Not idempotent: a retried create after a timeout could make a second Sheet.
+  const res = await withRetry(
+    () =>
+      sheets.spreadsheets.create({
+        requestBody: {
+          properties: { title: 'Stone Bridge — Captured Leads' },
+          sheets: [{ properties: { title: PREFERRED_TAB } }]
+        },
+        fields: 'spreadsheetId,spreadsheetUrl'
+      }),
+    { idempotent: false }
   )
   const id = res.data.spreadsheetId
   if (!id) throw new Error('Sheets create: the API returned no spreadsheetId.')
@@ -137,12 +143,15 @@ async function createSpreadsheet(): Promise<string> {
   // Share it back to the operator so it appears in their Drive.
   if (cfg.operatorShareEmail) {
     try {
-      await withRetry(() =>
-        drive.permissions.create({
-          fileId: id,
-          requestBody: { type: 'user', role: 'writer', emailAddress: cfg.operatorShareEmail },
-          sendNotificationEmail: false
-        })
+      // Re-sharing with the same user is harmless, so this POST may retry.
+      await withRetry(
+        () =>
+          drive.permissions.create({
+            fileId: id,
+            requestBody: { type: 'user', role: 'writer', emailAddress: cfg.operatorShareEmail },
+            sendNotificationEmail: false
+          }),
+        { service: 'drive' }
       )
     } catch {
       // Non-fatal: the operator can still open it by URL / share manually.
@@ -160,9 +169,16 @@ interface TabRef {
   sheetId: number
 }
 
+/** Settings key remembering the resolved tab's numeric sheetId, per spreadsheet. */
+function tabSettingKey(spreadsheetId: string): string {
+  return `google_sheet_tab_id:${spreadsheetId}`
+}
+
 /**
- * Resolve the tab to write to: a "Leads" tab if present (the app's convention),
- * otherwise the FIRST tab — so an operator's own sheet works without renaming.
+ * Resolve the tab to write to: the tab remembered from an earlier push (by
+ * numeric sheetId, so a rename/reorder can't redirect rows); else a "Leads" tab
+ * if present (the app's convention), otherwise the FIRST tab — so an
+ * operator's own sheet works without renaming.
  */
 async function resolveTab(spreadsheetId: string): Promise<TabRef> {
   const { sheets } = getGoogleClients()
@@ -175,7 +191,11 @@ async function resolveTab(spreadsheetId: string): Promise<TabRef> {
   if (tabs.length === 0) {
     throw new Error(`Spreadsheet ${spreadsheetId} has no tabs.`)
   }
-  const chosen = tabs.find((t) => t.title === PREFERRED_TAB) || tabs[0]
+  const remembered = Number(getSetting(tabSettingKey(spreadsheetId)) ?? NaN)
+  const chosen =
+    tabs.find((t) => t.sheetId === remembered) || // vanished id → fall back below
+    tabs.find((t) => t.title === PREFERRED_TAB) ||
+    tabs[0]
   return { title: chosen.title as string, sheetId: chosen.sheetId as number }
 }
 
@@ -192,7 +212,17 @@ async function ensureHeader(spreadsheetId: string, tab: TabRef): Promise<void> {
   )
   const row1 = cur.data.values?.[0] || []
 
-  if (!row1[0]) {
+  // Column I onward is the app's machinery. If the operator already uses I for
+  // something else, stop — never write lead ids over their data.
+  const idHeader = String(row1[ID_COL_INDEX] ?? '').trim()
+  if (idHeader && idHeader !== HIDDEN_HEADER[0]) {
+    throw new Error(
+      `Column ${ID_COL} of the "${tab.title}" tab already has its own header ("${idHeader.slice(0, 40)}"). ` +
+        `The app keeps its bookkeeping in columns ${ID_COL}–${LAST_COL}. Move that data, or add a tab named "${PREFERRED_TAB}" for the app.`
+    )
+  }
+
+  if (row1.every((c) => !String(c ?? '').trim())) {
     // Fresh sheet — write the whole header (visible + hidden).
     await withRetry(() =>
       sheets.spreadsheets.values.update({
@@ -257,19 +287,24 @@ export async function ensureSpreadsheet(): Promise<{ id: string; tab: TabRef }> 
   if (!id) id = await createSpreadsheet()
   const tab = await resolveTab(id)
   await ensureHeader(id, tab)
+  // Remember the tab only once it's known-good (header check passed).
+  setSetting(tabSettingKey(id), String(tab.sheetId))
   return { id, tab }
 }
 
-async function readIdColumn(spreadsheetId: string, tab: string): Promise<string[]> {
+/** One read of the id column (I2:I), no retry — for use INSIDE a withRetry. */
+async function fetchIdColumn(spreadsheetId: string, tab: string): Promise<string[]> {
   const { sheets } = getGoogleClients()
-  const idRes = await withRetry(() =>
-    sheets.spreadsheets.values.get({
-      spreadsheetId,
-      range: a1(tab, `${ID_COL}2:${ID_COL}`),
-      majorDimension: 'COLUMNS'
-    })
-  )
+  const idRes = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: a1(tab, `${ID_COL}2:${ID_COL}`),
+    majorDimension: 'COLUMNS'
+  })
   return ((idRes.data.values && idRes.data.values[0]) || []) as string[]
+}
+
+async function readIdColumn(spreadsheetId: string, tab: string): Promise<string[]> {
+  return withRetry(() => fetchIdColumn(spreadsheetId, tab))
 }
 
 /** Idempotent upsert of ONE lead: update its existing row, or append a new one. */
@@ -281,25 +316,32 @@ async function upsert(
   const { sheets } = getGoogleClients()
   const ids = await readIdColumn(spreadsheetId, tab)
   const existingRow = findRowNumber(ids, lead.id)
-  const row = leadToRow(lead)
+  // Column D shows the status the lead has once this push lands.
+  const row = leadToRow({ ...lead, status: 'pushed' })
 
   if (existingRow === -1) {
-    const appendRes = await withRetry(() =>
-      sheets.spreadsheets.values.append({
+    return withRetry(async (attempt) => {
+      // A timed-out append may still have landed: re-check the id column before
+      // repeating it, or the retry would write a duplicate row.
+      if (attempt > 0) {
+        const landed = findRowNumber(await fetchIdColumn(spreadsheetId, tab), lead.id)
+        if (landed !== -1) return { row: landed, created: true }
+      }
+      const appendRes = await sheets.spreadsheets.values.append({
         spreadsheetId,
         range: a1(tab, 'A1'),
         valueInputOption: 'RAW',
         insertDataOption: 'INSERT_ROWS',
         requestBody: { values: [row] }
       })
-    )
-    const parsed = rowFromA1Range(appendRes.data.updates?.updatedRange)
-    if (parsed === -1) {
-      throw new Error(
-        'Sheets append: could not determine the written row from the API response; refusing to guess (a wrong row would corrupt idempotency).'
-      )
-    }
-    return { row: parsed, created: true }
+      const parsed = rowFromA1Range(appendRes.data.updates?.updatedRange)
+      if (parsed === -1) {
+        throw new Error(
+          'Sheets append: could not determine the written row from the API response; refusing to guess (a wrong row would corrupt idempotency).'
+        )
+      }
+      return { row: parsed, created: true }
+    })
   }
   await withRetry(() =>
     sheets.spreadsheets.values.update({
@@ -336,7 +378,7 @@ async function upsertMany(
     } else {
       updates.push({
         range: a1(tab, `A${existingRow}:${LAST_COL}${existingRow}`),
-        values: [leadToRow(lead)]
+        values: [leadToRow({ ...lead, status: 'pushed' })]
       })
       out.set(lead.id, { row: existingRow, created: false })
     }
@@ -352,20 +394,30 @@ async function upsertMany(
   }
 
   if (toAppend.length > 0) {
-    const appendRes = await withRetry(() =>
-      sheets.spreadsheets.values.append({
+    const rows = await withRetry(async (attempt) => {
+      // Same duplicate guard as upsert: one append call lands all rows or none.
+      if (attempt > 0) {
+        const now = await fetchIdColumn(spreadsheetId, tab)
+        const landed = toAppend.map((l) => findRowNumber(now, l.id))
+        if (landed.every((r) => r !== -1)) return landed
+        if (landed.some((r) => r !== -1)) {
+          throw new Error('Sheets bulk append: an earlier attempt partly shows in the Sheet; push again to reconcile.')
+        }
+      }
+      const appendRes = await sheets.spreadsheets.values.append({
         spreadsheetId,
         range: a1(tab, 'A1'),
         valueInputOption: 'RAW',
         insertDataOption: 'INSERT_ROWS',
-        requestBody: { values: toAppend.map((l) => leadToRow(l)) }
+        requestBody: { values: toAppend.map((l) => leadToRow({ ...l, status: 'pushed' })) }
       })
-    )
-    const start = rowFromA1Range(appendRes.data.updates?.updatedRange)
-    if (start === -1) {
-      throw new Error('Sheets bulk append: could not determine the written start row from the API response.')
-    }
-    toAppend.forEach((lead, i) => out.set(lead.id, { row: start + i, created: true }))
+      const start = rowFromA1Range(appendRes.data.updates?.updatedRange)
+      if (start === -1) {
+        throw new Error('Sheets bulk append: could not determine the written start row from the API response.')
+      }
+      return toAppend.map((_, i) => start + i)
+    })
+    toAppend.forEach((lead, i) => out.set(lead.id, { row: rows[i], created: true }))
   }
 
   return out
@@ -417,16 +469,14 @@ export async function deleteSheetRow(id: string): Promise<{ ok: boolean; error: 
   try {
     const { id: spreadsheetId, tab } = await ensureSpreadsheet()
     const { sheets } = getGoogleClients()
-    // Re-resolve the physical row by id — the stored sheet_row may be stale after
-    // prior deletes shifted rows. Never delete a row we can't positively identify.
-    const ids = await readIdColumn(spreadsheetId, tab.title)
-    const row = findRowNumber(ids, id)
-    if (row === -1) {
-      clearSheetLink(id) // already gone from the Sheet
-      return { ok: true, error: null }
-    }
-    await withRetry(() =>
-      sheets.spreadsheets.batchUpdate({
+    // Re-resolve the physical row by id on EVERY attempt — the stored sheet_row
+    // may be stale after prior deletes shifted rows, and deleteDimension is not
+    // idempotent: repeating it after a timed-out-but-successful attempt would
+    // delete the NEXT lead's row. Never delete a row we can't positively identify.
+    await withRetry(async () => {
+      const row = findRowNumber(await fetchIdColumn(spreadsheetId, tab.title), id)
+      if (row === -1) return // already gone from the Sheet (or an earlier attempt landed)
+      await sheets.spreadsheets.batchUpdate({
         spreadsheetId,
         requestBody: {
           requests: [
@@ -438,7 +488,7 @@ export async function deleteSheetRow(id: string): Promise<{ ok: boolean; error: 
           ]
         }
       })
-    )
+    })
     clearSheetLink(id)
     return { ok: true, error: null }
   } catch (e) {
@@ -498,6 +548,7 @@ export function runSheetsMappingSelfTest(): string {
   checks.push(`B_phone=${row[1] === '+16175551234'}`)
   checks.push(`C_name=${row[2] === 'Jane'}`)
   checks.push(`D_status=${row[3] === 'reviewed'}`)
+  checks.push(`D_status_pushed_on_push=${leadToRow({ ...lead, status: 'pushed' })[3] === 'pushed'}`)
   checks.push(`E_offer_is_asking=${row[4] === '300000'}`)
   checks.push(`F_story_has_summary=${row[5].includes('A neutral summary.')}`)
   checks.push(`F_story_has_motivation=${row[5].includes('relocating')}`)

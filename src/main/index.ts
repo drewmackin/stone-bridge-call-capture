@@ -12,6 +12,7 @@ import { getDb, closeDb } from './db/connection'
 import { registerIpc } from './ipc'
 import { runCaptureSelfTest, runPipelineSelfTest } from './services/capture-service'
 import { setPipelineWindow } from './services/pipeline'
+import { killAllTranscribers } from './transcription/LocalWhisper'
 import { runExtractionValidationSelfTest } from './extraction/selftest'
 import { runBackendSelfTest } from './services/leads-service'
 import { runSheetsMappingSelfTest } from './sheets/sync'
@@ -45,6 +46,24 @@ if (RUN_SELFTESTS) {
 }
 
 let mainWindow: BrowserWindow | null = null
+/** True once bootstrap has created the first window (DB + IPC are up). */
+let booted = false
+
+/**
+ * Hand a URL to the system browser — http(s) only, so a crafted link can't
+ * launch file:, smb: or custom-scheme handlers. Failures are swallowed (a
+ * missing default browser must not surface as an unhandled rejection).
+ */
+function openExternalSafe(url: string): void {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return
+  shell.openExternal(parsed.toString()).catch(() => {})
+}
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -69,12 +88,33 @@ function createWindow(): void {
   // re-activation (app.on('activate') checks for zero open windows).
   mainWindow.on('closed', () => {
     mainWindow = null
+    setPipelineWindow(null) // a running pipeline keeps going, it just stops emitting
   })
   setPipelineWindow(mainWindow)
 
+  // The renderer's beforeunload handler vetoes unload while a call is being
+  // recorded (the audio lives in memory until Stop). Electron then asks us —
+  // and because Cmd+Q closes every window before quitting, this same prompt
+  // guards quit as well: "Keep recording" cancels the close AND the quit.
+  const contents = mainWindow.webContents
+  contents.on('will-prevent-unload', (event) => {
+    const owner = BrowserWindow.fromWebContents(contents)
+    const opts = {
+      type: 'warning' as const,
+      buttons: ['Keep the app open', 'Discard the call and close'],
+      defaultId: 0,
+      cancelId: 0,
+      message: 'This call isn’t saved yet.',
+      detail:
+        'A call is recording, or a finished call is waiting to be saved. Closing now discards that audio. Stop the recording (or press Retry save) first to keep it.'
+    }
+    const choice = owner ? dialog.showMessageBoxSync(owner, opts) : dialog.showMessageBoxSync(opts)
+    if (choice === 1) event.preventDefault() // ignore the veto — let the close proceed
+  })
+
   // Open external links (statute citations, etc.) in the system browser.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('http')) shell.openExternal(url)
+    openExternalSafe(url)
     return { action: 'deny' }
   })
 
@@ -84,7 +124,7 @@ function createWindow(): void {
     const current = mainWindow?.webContents.getURL()
     if (url !== current) {
       event.preventDefault()
-      if (url.startsWith('http')) shell.openExternal(url)
+      openExternalSafe(url)
     }
   })
 
@@ -155,13 +195,34 @@ async function bootstrap(): Promise<void> {
   }
 
   createWindow()
+  booted = true
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 }
 
-app.whenReady().then(bootstrap).catch((e) => {
+// One running copy per profile: a second launch focuses the existing window
+// instead of opening a second writer on the same SQLite DB. The lock is keyed
+// to the userData dir, so self-test runs on a throwaway --user-data-dir are
+// unaffected by (and don't affect) a running operator app.
+const gotSingleInstanceLock = app.requestSingleInstanceLock()
+if (!gotSingleInstanceLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow) {
+      if (booted) createWindow() // macOS: app alive with its window closed
+      return
+    }
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+  })
+  app.whenReady().then(bootstrap).catch(onStartupFailure)
+}
+
+function onStartupFailure(e: unknown): void {
   // A startup failure (DB migration, mkdir, config) must be loud, not silent.
   const message = e instanceof Error ? e.message : String(e)
   // eslint-disable-next-line no-console
@@ -172,12 +233,14 @@ app.whenReady().then(bootstrap).catch((e) => {
     /* dialog may be unavailable pre-ready */
   }
   app.quit()
-})
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
 app.on('will-quit', () => {
+  // A mid-inference Whisper sidecar would otherwise outlive the app.
+  killAllTranscribers()
   closeDb()
 })

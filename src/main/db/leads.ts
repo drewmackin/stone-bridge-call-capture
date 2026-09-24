@@ -211,8 +211,11 @@ export function listLeads(opts: ListLeadsOptions = {}): Lead[] {
     params.status = status
   }
   if (search.trim()) {
-    where.push('(name LIKE @q OR phone_raw LIKE @q OR phone_e164 LIKE @q OR address LIKE @q)')
-    params.q = `%${search.trim()}%`
+    // Escape LIKE wildcards so a typed "%" or "_" matches literally.
+    where.push(
+      "(name LIKE @q ESCAPE '\\' OR phone_raw LIKE @q ESCAPE '\\' OR phone_e164 LIKE @q ESCAPE '\\' OR address LIKE @q ESCAPE '\\')"
+    )
+    params.q = `%${search.trim().replace(/[\\%_]/g, (c) => `\\${c}`)}%`
   }
 
   // Whitelist sort column to avoid SQL injection through the column name.
