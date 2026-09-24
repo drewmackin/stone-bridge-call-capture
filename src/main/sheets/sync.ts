@@ -327,11 +327,14 @@ async function upsert(
         const landed = findRowNumber(await fetchIdColumn(spreadsheetId, tab), lead.id)
         if (landed !== -1) return { row: landed, created: true }
       }
+      // OVERWRITE fills the next empty row under the table. INSERT_ROWS would
+      // insert a new row, and Sheets copies the row above's formatting onto it —
+      // on a styled sheet every lead came out looking like the header.
       const appendRes = await sheets.spreadsheets.values.append({
         spreadsheetId,
         range: a1(tab, 'A1'),
         valueInputOption: 'RAW',
-        insertDataOption: 'INSERT_ROWS',
+        insertDataOption: 'OVERWRITE',
         requestBody: { values: [row] }
       })
       const parsed = rowFromA1Range(appendRes.data.updates?.updatedRange)
@@ -408,7 +411,7 @@ async function upsertMany(
         spreadsheetId,
         range: a1(tab, 'A1'),
         valueInputOption: 'RAW',
-        insertDataOption: 'INSERT_ROWS',
+        insertDataOption: 'OVERWRITE', // same reason as the single append above
         requestBody: { values: toAppend.map((l) => leadToRow({ ...l, status: 'pushed' })) }
       })
       const start = rowFromA1Range(appendRes.data.updates?.updatedRange)
