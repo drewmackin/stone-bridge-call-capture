@@ -4,9 +4,9 @@
 // hidden bookkeeping column): re-pushing updates the existing row instead of
 // duplicating.
 //
-// The operator's sheet uses THEIR column layout (A–H, below). The dedupe id and
+// The operator's sheet uses THEIR column layout (A–F, below). The dedupe id and
 // all bookkeeping the app needs are written to hidden columns to the RIGHT of
-// their layout (I onward) so their view stays clean and readable. Never the full
+// their layout (G onward) so their view stays clean and readable. Never the full
 // transcript. The target tab is resolved at runtime (a "Leads" tab if present,
 // else the first tab) so the operator doesn't have to rename anything; once
 // resolved it is remembered by its numeric sheetId, so renaming or reordering
@@ -19,26 +19,27 @@ import { getConfig } from '../config'
 import { getSetting, setSetting } from '../db/settings'
 import { getLead, listLeads, markPushed, clearSheetLink } from '../db/leads'
 import { getGoogleClients, withRetry } from './client'
-import { VISIBLE_SHEET_HEADER, composeStory, composeSpecs } from '@shared/sheet-view'
+import { VISIBLE_SHEET_HEADER, composeAction, formatSheetPhone } from '@shared/sheet-view'
 import { errMsg } from '@shared/errors'
 
 /** Preferred tab name (used for app-created sheets); existing sheets fall back to their first tab. */
 const PREFERRED_TAB = 'Leads'
 
-/** Hidden bookkeeping columns, I onward — the app's machinery, kept out of the way. */
+/** Hidden bookkeeping columns, G onward — the app's machinery, kept out of the way. */
 export const HIDDEN_HEADER = [
-  'lead_id', // I  (idempotency key)
-  'created_at', // J
-  'next_action', // K
-  'meeting_datetime', // L
-  'calendar_event', // M  (link)
-  'consent_state', // N
-  'consent_method', // O
-  'consent_confirmed', // P
-  'transcript_file', // Q
-  'audio_file', // R
-  'phone_raw', // S
-  'needs_review' // T
+  'lead_id', // G  (idempotency key)
+  'created_at', // H
+  'next_action', // I
+  'meeting_datetime', // J
+  'calendar_event', // K  (link)
+  'consent_state', // L
+  'consent_method', // M
+  'consent_confirmed', // N
+  'transcript_file', // O
+  'audio_file', // P
+  'phone_raw', // Q
+  'needs_review', // R
+  'status' // S
 ]
 
 export const FULL_HEADER = [...VISIBLE_SHEET_HEADER, ...HIDDEN_HEADER]
@@ -57,8 +58,8 @@ function colLetter(index0: number): string {
   return s
 }
 
-const ID_COL = colLetter(ID_COL_INDEX) // "I"
-const LAST_COL = colLetter(FULL_HEADER.length - 1) // "T"
+const ID_COL = colLetter(ID_COL_INDEX) // "G"
+const LAST_COL = colLetter(FULL_HEADER.length - 1) // "S"
 
 /** Build a sheet-qualified A1 range, quoting the tab name when it needs it. */
 function a1(tab: string, cells: string): string {
@@ -66,30 +67,29 @@ function a1(tab: string, cells: string): string {
   return `${q}!${cells}`
 }
 
-/** Map a lead to a Sheet row, in header order (visible A–H, then hidden I–T). Pure. */
+/** Map a lead to a Sheet row, in header order (visible A–F, then hidden G–S). Pure. */
 export function leadToRow(lead: Lead): string[] {
   return [
     lead.address, // A Address
-    lead.phone_e164 || lead.phone_raw, // B Phone Number
-    lead.name, // C Name
-    lead.status, // D Status
-    lead.asking_price, // E Offer (seller's asking price)
-    composeStory(lead), // F Story Of Property/Person
-    lead.condition_notes, // G Concerns of property
-    composeSpecs(lead), // H Bath, square footage, land
-    // --- hidden bookkeeping (I onward) ---
-    lead.id, // I lead_id
-    lead.created_at, // J created_at
-    lead.next_action, // K next_action
-    lead.meeting_datetime, // L meeting_datetime
-    lead.calendar_event_link, // M calendar_event
-    lead.consent_state, // N consent_state
-    lead.consent_method, // O consent_method
-    lead.consent_confirmed ? 'yes' : 'no', // P consent_confirmed
-    lead.transcript_path ? basename(lead.transcript_path) : '', // Q transcript_file
-    lead.audio_path ? basename(lead.audio_path) : '', // R audio_file
-    lead.phone_raw, // S phone_raw
-    lead.needs_review ? 'yes' : 'no' // T needs_review
+    lead.name, // B Name
+    formatSheetPhone(lead), // C Number
+    composeAction(lead), // D ACTION (next step + meeting)
+    lead.asking_price, // E Offers (seller's asking price)
+    lead.condition_notes, // F Property concerns
+    // --- hidden bookkeeping (G onward) ---
+    lead.id, // G lead_id
+    lead.created_at, // H created_at
+    lead.next_action, // I next_action
+    lead.meeting_datetime, // J meeting_datetime
+    lead.calendar_event_link, // K calendar_event
+    lead.consent_state, // L consent_state
+    lead.consent_method, // M consent_method
+    lead.consent_confirmed ? 'yes' : 'no', // N consent_confirmed
+    lead.transcript_path ? basename(lead.transcript_path) : '', // O transcript_file
+    lead.audio_path ? basename(lead.audio_path) : '', // P audio_file
+    lead.phone_raw, // Q phone_raw
+    lead.needs_review ? 'yes' : 'no', // R needs_review
+    lead.status // S status
   ]
 }
 
@@ -200,8 +200,8 @@ async function resolveTab(spreadsheetId: string): Promise<TabRef> {
 }
 
 /**
- * Ensure headers exist. Never clobbers an operator's own visible headers (A–H):
- * on a sheet they brought, we only LABEL the hidden bookkeeping columns (I–T) if
+ * Ensure headers exist. Never clobbers an operator's own visible headers (A–F):
+ * on a sheet they brought, we only LABEL the hidden bookkeeping columns (G–S) if
  * they're blank, and hide those columns so their view stays clean. On a fresh
  * (app-created) sheet with an empty row 1, we write the whole header.
  */
@@ -537,31 +537,31 @@ export function runSheetsMappingSelfTest(): string {
   }
   const row = leadToRow(lead)
 
-  // Layout: 8 visible (A–H) + 12 hidden (I–T) = 20 columns.
-  checks.push(`header_len=${FULL_HEADER.length === 20}`)
+  // Layout: 6 visible (A–F) + 13 hidden (G–S) = 19 columns.
+  checks.push(`header_len=${FULL_HEADER.length === 19}`)
   checks.push(`row_len=${row.length === FULL_HEADER.length}`)
-  checks.push(`id_col_letter=${ID_COL === 'I'}`)
-  checks.push(`last_col_letter=${LAST_COL === 'T'}`)
+  checks.push(`id_col_letter=${ID_COL === 'G'}`)
+  checks.push(`last_col_letter=${LAST_COL === 'S'}`)
 
-  // Visible columns map to the operator's layout.
+  // Visible columns = the operator's "Stone bridge 2027" layout.
   checks.push(`A_address=${row[0] === '1 Main St'}`)
-  checks.push(`B_phone=${row[1] === '+16175551234'}`)
-  checks.push(`C_name=${row[2] === 'Jane'}`)
-  checks.push(`D_status=${row[3] === 'reviewed'}`)
-  checks.push(`D_status_pushed_on_push=${leadToRow({ ...lead, status: 'pushed' })[3] === 'pushed'}`)
-  checks.push(`E_offer_is_asking=${row[4] === '300000'}`)
-  checks.push(`F_story_has_summary=${row[5].includes('A neutral summary.')}`)
-  checks.push(`F_story_has_motivation=${row[5].includes('relocating')}`)
-  checks.push(`G_concerns_is_condition=${row[6] === 'roof'}`)
-  checks.push(`H_specs_has_beds_baths=${row[7].includes('3 bd') && row[7].includes('2 ba')}`)
+  checks.push(`B_name=${row[1] === 'Jane'}`)
+  checks.push(`C_number_dialable=${row[2] === '(617) 555-1234'}`)
+  checks.push(`C_number_raw_fallback=${leadToRow({ ...lead, phone_e164: '', phone_raw: 'six one seven' })[2] === 'six one seven'}`)
+  checks.push(`D_action_has_next_step=${row[3].startsWith('follow up')}`)
+  checks.push(`D_action_has_meeting=${row[3].includes('Meeting Thu, Jul 2') && row[3].includes('3:00')}`)
+  checks.push(`D_action_empty_ok=${leadToRow({ ...lead, next_action: '', meeting_datetime: '' })[3] === ''}`)
+  checks.push(`E_offers_is_asking=${row[4] === '300000'}`)
+  checks.push(`F_concerns_is_condition=${row[5] === 'roof'}`)
 
-  // Hidden bookkeeping columns (I–T).
-  checks.push(`I_id=${row[ID_COL_INDEX] === 'abc-123'}`)
-  checks.push(`L_meeting=${row[11] === '2026-07-02T15:00:00'}`)
-  checks.push(`M_calendar=${row[12] === 'https://calendar.google.com/event?eid=evt-1'}`)
-  checks.push(`P_confirmed_yes=${row[15] === 'yes'}`)
-  checks.push(`Q_transcript_basename=${row[16] === 'abc.txt'}`)
-  checks.push(`R_audio_basename=${row[17] === 'abc.wav'}`)
+  // Hidden bookkeeping.
+  checks.push(`G_id=${row[ID_COL_INDEX] === 'abc-123'}`)
+  checks.push(`J_meeting=${row[9] === '2026-07-02T15:00:00'}`)
+  checks.push(`K_calendar=${row[10] === 'https://calendar.google.com/event?eid=evt-1'}`)
+  checks.push(`N_confirmed_yes=${row[13] === 'yes'}`)
+  checks.push(`O_transcript_basename=${row[14] === 'abc.txt'}`)
+  checks.push(`P_audio_basename=${row[15] === 'abc.wav'}`)
+  checks.push(`S_status_pushed_on_push=${leadToRow({ ...lead, status: 'pushed' })[18] === 'pushed'}`)
   checks.push(`no_full_transcript=${!row.includes('long transcript not sent to sheet')}`)
 
   // Idempotency: id lookup in the (hidden) id column.

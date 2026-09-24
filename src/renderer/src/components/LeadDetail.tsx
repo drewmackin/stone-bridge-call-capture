@@ -264,9 +264,11 @@ export default function LeadDetail({ leadId, onBack, onChanged, leaveGuard }: Pr
     }
   }
 
+  // Approving IS the send: mark it approved, then put it on the Sheet right away.
+  // If the push fails the lead stays Approved, so "Push to Sheet" can retry it.
   const approve = async (): Promise<void> => {
     const updated = await save({ status: 'reviewed' })
-    if (updated) setMsg({ tone: 'ok', text: 'Approved. Push it to the Sheet when you’re ready.' })
+    if (updated) await push()
   }
 
   const analyze = async (): Promise<void> => {
@@ -352,8 +354,9 @@ export default function LeadDetail({ leadId, onBack, onChanged, leaveGuard }: Pr
     )
   } else if (lead.status === 'new') {
     primary = (
-      <button className="btn-primary" onClick={() => void approve()} disabled={busy}>
-        <CheckIcon className="h-3.5 w-3.5" /> Approve
+      <button className="btn-primary" onClick={() => void approve()} disabled={busy} title="Approve this lead and add it to your Google Sheet">
+        {pushing ? <SpinnerIcon className="h-3.5 w-3.5" /> : <UploadIcon className="h-3.5 w-3.5" />}
+        {pushing ? 'Pushing…' : 'Approve & push'}
       </button>
     )
   } else if (lead.status === 'reviewed' || lead.status === 'pushed') {
@@ -587,7 +590,7 @@ export default function LeadDetail({ leadId, onBack, onChanged, leaveGuard }: Pr
             <h2 id="preview-heading" className="t-heading">
               What the Sheet will get
             </h2>
-            <p className="t-meta mt-0.5">Columns A–H, live as you edit. Bookkeeping goes to hidden columns.</p>
+            <p className="t-meta mt-0.5">Columns A–F, live as you edit. Bookkeeping goes to hidden columns.</p>
           </div>
           <dl className="divide-y divide-line">
             {visibleSheetColumns({ ...draft, status: 'pushed' }).map((c) => (
