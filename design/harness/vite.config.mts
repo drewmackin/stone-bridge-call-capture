@@ -10,7 +10,7 @@
 
 import { resolve } from 'path'
 import { fileURLToPath } from 'url'
-import { defineConfig, type Plugin } from 'vite'
+import { defineConfig, normalizePath, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 
 const here = fileURLToPath(new URL('.', import.meta.url))
@@ -24,7 +24,8 @@ const injectMock: Plugin = {
     return [
       {
         tag: 'script',
-        attrs: { type: 'module', src: `/@fs${resolve(here, 'mock-api.ts')}` },
+        // normalizePath: Windows paths need forward slashes in the /@fs/ URL.
+        attrs: { type: 'module', src: `/@fs/${normalizePath(resolve(here, 'mock-api.ts')).replace(/^\//, '')}` },
         injectTo: 'head-prepend'
       }
     ]

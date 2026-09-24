@@ -43,3 +43,18 @@ mac:
 
 dmg:
   title: Stone Bridge Call Capture
+
+# Windows installer (npm run dist:win, run ON Windows after `npm run build:sidecar`
+# so resources/whisper-sidecar holds stone-whisper.exe). Unsigned: SmartScreen
+# will say "unknown publisher" the first time → More info → Run anyway.
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  shortcutName: Stone Bridge Call Capture

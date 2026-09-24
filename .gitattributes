@@ -1,0 +1,6 @@
+# Keep LF everywhere (shell/Python scripts break with CRLF; diffs stay clean across Mac + Windows).
+* text=auto eol=lf
+*.png binary
+*.icns binary
+*.ico binary
+*.wav binary

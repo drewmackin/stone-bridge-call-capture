@@ -1,0 +1,71 @@
+# Proves the project installs, type-checks, passes its self-tests, builds its
+# transcription engine (and transcribes with it), and packages — on Windows AND
+# macOS — for every push and pull request. Public repo: Actions minutes are free.
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Install, typecheck, self-tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run verify
+
+  sidecar:
+    name: Build transcription engine + transcribe (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Build the sidecar
+        run: npm run build:sidecar
+      - name: Transcribe a test recording with the built engine
+        shell: bash
+        run: |
+          python -c "import wave; w=wave.open('ci.wav','wb'); w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(b'\x00\x00'*16000); w.close()"
+          EXE=resources/whisper-sidecar/stone-whisper
+          if [ -f "$EXE.exe" ]; then EXE="$EXE.exe"; fi
+          "$EXE" --audio ci.wav --model tiny --language en > out.json
+          python -c "import json; d=json.load(open('out.json')); assert 'error' not in d and 'text' in d, d; print('sidecar OK:', d)"
+
+  package-windows:
+    name: Package the Windows app
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run dist:win -- --dir
+      - name: Check the packaged app exists
+        shell: bash
+        run: |
+          test -f "dist/win-unpacked/Stone Bridge Call Capture.exe"
+          ls -la dist/win-unpacked

@@ -74,7 +74,15 @@ function createWindow(): void {
     show: false,
     backgroundColor: '#091428',
     title: 'Stone Bridge Call Capture',
-    titleBarStyle: 'hiddenInset',
+    // macOS: traffic lights inset into the navy toolbar. Windows/Linux: hidden
+    // title bar with the native minimize/maximize/close drawn over the
+    // toolbar's right edge ("hiddenInset" alone would leave NO window controls).
+    ...(process.platform === 'darwin'
+      ? { titleBarStyle: 'hiddenInset' as const }
+      : {
+          titleBarStyle: 'hidden' as const,
+          titleBarOverlay: { color: '#081328', symbolColor: '#ffffff', height: 52 }
+        }),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,

@@ -26,3 +26,4 @@ resources/whisper-sidecar/stone-whisper
 *.log
 .idea/
 .vscode/
+resources/whisper-sidecar/stone-whisper.exe

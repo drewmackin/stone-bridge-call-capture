@@ -40,7 +40,7 @@ Leads screen (review / approve / push) ◄─────┘
 
 | Decision | Choice |
 |---|---|
-| Operating system | **macOS** (arm64) |
+| Operating system | **macOS** (Apple Silicon) primary; **Windows 10/11 x64** supported (CI-tested) |
 | How calls are made | **Physical phone on speaker** → laptop mic, single channel |
 | Transcription engine | **Local Whisper** (faster‑whisper) — audio stays on the machine |
 | Google Sheet | **Created on first run**, shared back to your email |
@@ -90,7 +90,7 @@ src/preload/         contextBridge — the renderer's only door to main
 src/renderer/        React UI: Record (call console) + Leads (review/push); OKLCH design tokens in index.css
 src/shared/          types, IPC contract, WAV encoder, compliance copy
 resources/whisper-sidecar/  faster‑whisper sidecar source (transcribe.py)
-scripts/build-sidecar.sh    builds the sidecar into a self‑contained executable
+scripts/build_sidecar.py    builds the sidecar into a self‑contained executable (npm run build:sidecar; macOS + Windows)
 tests/fixtures/      test‑only stubs (never bundled)
 ```
 
@@ -127,11 +127,12 @@ The app can verify its own critical paths headlessly:
 `npm run verify` runs all of them and reports PASS/FAIL. Each run uses a temporary
 `--user-data-dir`, so it never touches the real leads database or its `.env`.
 
-## Package (macOS arm64)
+## Package (macOS + Windows)
 
 ```bash
-./scripts/build-sidecar.sh   # one-time: build the faster-whisper sidecar on this Mac
-npm run dist                 # produces dist/Stone Bridge Call Capture-<v>-arm64.dmg
+npm run build:sidecar        # one-time: build the faster-whisper sidecar on this machine
+npm run dist                 # macOS: dist/Stone Bridge Call Capture-<v>-arm64.dmg
+npm run dist:win             # Windows (run on Windows): dist/Stone Bridge Call Capture Setup <v>.exe
 ```
 
 > **Signing:** without an Apple Developer ID the build is **ad‑hoc signed** by

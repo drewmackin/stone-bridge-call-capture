@@ -14,14 +14,16 @@
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "rebuild": "electron-rebuild -f -w better-sqlite3",
-    "smoke": "SMOKE_TEST=1 electron .",
-    "verify": "bash ./scripts/run-selftests.sh",
+    "smoke": "node scripts/run-selftests.cjs --smoke",
+    "verify": "node scripts/run-selftests.cjs",
     "test": "node --test",
     "dist": "electron-vite build && electron-builder --mac --arm64",
     "dist:dir": "electron-vite build && electron-builder --mac --arm64 --dir",
     "postinstall": "node scripts/postinstall.cjs",
     "keys": "node scripts/setup-env.cjs --open",
-    "ui": "vite --config design/harness/vite.config.mts"
+    "ui": "vite --config design/harness/vite.config.mts",
+    "build:sidecar": "node scripts/build-sidecar.cjs",
+    "dist:win": "electron-vite build && electron-builder --win --x64"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.1",

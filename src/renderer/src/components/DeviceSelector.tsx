@@ -1,5 +1,6 @@
 import { useId } from 'react'
 import { MicOffIcon, RefreshIcon } from './icons'
+import { isWindows } from '../lib/platform'
 
 interface Props {
   devices: MediaDeviceInfo[]
@@ -62,8 +63,9 @@ export default function DeviceSelector({
         <p className="mt-2 flex items-start gap-1.5 text-[12px] font-medium leading-snug text-danger">
           <MicOffIcon className="mt-px h-3.5 w-3.5 shrink-0" />
           <span>
-            No microphone access. Allow it in System Settings → Privacy &amp; Security → Microphone, then press
-            refresh.
+            {isWindows
+              ? 'No microphone access. In Windows Settings → Privacy & security → Microphone, turn on “Let desktop apps access your microphone”, then press refresh.'
+              : 'No microphone access. Allow it in System Settings → Privacy & Security → Microphone, then press refresh.'}
           </span>
         </p>
       ) : (

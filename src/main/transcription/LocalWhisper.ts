@@ -77,13 +77,24 @@ const ENV_KEYS = [
   'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'no_proxy',
   'OMP_NUM_THREADS'
 ]
+// Windows: Python and its DLLs won't start without these (SystemRoot above all).
+const WIN_ENV_KEYS = [
+  'SYSTEMROOT', 'WINDIR', 'SYSTEMDRIVE', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA',
+  'PATHEXT', 'COMSPEC', 'PROGRAMDATA', 'PROGRAMFILES', 'PROGRAMFILES(X86)', 'HOMEDRIVE', 'HOMEPATH',
+  'NUMBER_OF_PROCESSORS', 'PROCESSOR_ARCHITECTURE', 'USERNAME'
+]
 // HF_HOME / HF_HUB_CACHE / HF_HUB_OFFLINE / HF_TOKEN…, CTranslate2 tuning.
 const ENV_PREFIXES = ['HF_', 'HUGGINGFACE_', 'CT2_']
 
 function sidecarEnv(hfToken: string): NodeJS.ProcessEnv {
+  // Windows env names are case-insensitive and PATH is usually spelled "Path",
+  // so compare upper-cased there; POSIX names are exact.
+  const win = process.platform === 'win32'
+  const allowed = new Set(win ? [...ENV_KEYS, ...WIN_ENV_KEYS].map((k) => k.toUpperCase()) : ENV_KEYS)
   const env: NodeJS.ProcessEnv = {}
   for (const [k, v] of Object.entries(process.env)) {
-    if (v !== undefined && (ENV_KEYS.includes(k) || ENV_PREFIXES.some((p) => k.startsWith(p)))) env[k] = v
+    const key = win ? k.toUpperCase() : k
+    if (v !== undefined && (allowed.has(key) || ENV_PREFIXES.some((p) => key.startsWith(p)))) env[k] = v
   }
   // Dev/test: a python script run from a venv may rely on PYTHONPATH.
   if (process.env.STONE_WHISPER_SCRIPT && process.env.PYTHONPATH) env.PYTHONPATH = process.env.PYTHONPATH
@@ -110,7 +121,9 @@ function sidecarError(stdout: string): string {
 function invocation(): { cmd: string; baseArgs: string[] } {
   const script = process.env.STONE_WHISPER_SCRIPT
   if (script) {
-    return { cmd: process.env.STONE_WHISPER_PYTHON || 'python3', baseArgs: [script] }
+    // Windows installs Python as "python" (there is usually no "python3").
+    const python = process.platform === 'win32' ? 'python' : 'python3'
+    return { cmd: process.env.STONE_WHISPER_PYTHON || python, baseArgs: [script] }
   }
   return { cmd: sidecarPath(), baseArgs: [] }
 }

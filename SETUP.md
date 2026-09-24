@@ -9,6 +9,8 @@ pass the consent step → Record.
 
 > Throughout, "Terminal" means the macOS **Terminal** app (press ⌘‑Space, type "Terminal", Enter).
 > A line starting with `$` is a command — type/paste everything after the `$` and press Enter.
+>
+> **On Windows?** Read [Windows setup](#windows-setup) first — same steps, a few differences.
 
 ---
 
@@ -85,10 +87,11 @@ capture each side on its own channel:
 Transcription runs **on your Mac** (your audio never leaves it). You build the engine once.
 
 ```
-$ ./scripts/build-sidecar.sh
+$ npm run build:sidecar
 ```
 
-This downloads and packages faster‑whisper. It's a large download and takes several minutes. When
+This downloads and packages faster‑whisper (it needs Python 3.9+; `./scripts/build-sidecar.sh`
+still works on a Mac too). It's a large download and takes several minutes. When
 it finishes it prints the path to the built engine. The very first time you record, the app also
 downloads the speech model (~0.5 GB) — that's a one‑time download.
 
@@ -211,7 +214,7 @@ actually moves for *both* voices. Move the phone closer to the mic. (In the opti
 setup, also confirm System Output is set to the Multi‑Output device.)
 
 **“Local Whisper sidecar is not built.”**
-You haven't run step 4 yet, or it didn't finish. Run `./scripts/build-sidecar.sh` again and watch
+You haven't run step 4 yet, or it didn't finish. Run `npm run build:sidecar` again and watch
 for errors. Your already‑recorded audio is safe — open the lead in Leads and press **Transcribe**
 above its transcript after the build succeeds.
 
@@ -234,6 +237,34 @@ always kept — read it on the lead’s page and fill the fields yourself. The a
 **Microphone is blocked.**
 System Settings → Privacy & Security → Microphone → enable the app (or Terminal), then click the
 **refresh** button next to the Microphone menu on Record.
+
+---
+
+## Windows setup
+
+The app runs on Windows 10/11 (64‑bit) too. Follow the same steps with these differences:
+
+1. **Install once:** [Git](https://git-scm.com/download/win), [Node.js 20 LTS](https://nodejs.org/en/download)
+   (Windows Installer, x64), and [Python 3.11+](https://www.python.org/downloads/) — in the Python
+   installer tick **“Add python.exe to PATH”**. [GitHub Desktop](https://desktop.github.com) is the
+   easiest way to clone and push.
+2. **Terminal = PowerShell** (Start → type “PowerShell”). Run the same commands without the `$`:
+   `npm install`, `npm run build:sidecar`, `npm run keys`, `npm run dev`, `npm run verify`.
+3. **Your `.env`** lives at `%APPDATA%\stone-bridge-call-capture\.env`; `npm run keys` opens it
+   in Notepad. Key file paths use Windows form, e.g.
+   `GOOGLE_SERVICE_ACCOUNT_KEY_PATH=C:\Users\you\keys\service-account.json`.
+4. **Microphone:** Settings → Privacy & security → Microphone → turn on **“Let desktop apps access
+   your microphone.”** Then press refresh next to the Microphone menu.
+5. **Audio:** phone on speaker next to the laptop mic works the same. The optional two‑channel
+   “loopback” setup in step 3 is macOS‑specific (BlackHole); on Windows use a USB call‑recording
+   adapter that shows up as a stereo microphone.
+6. **If `npm install` fails while rebuilding `better-sqlite3`:** install
+   [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with the
+   **“Desktop development with C++”** workload, then run `npm run rebuild`.
+7. **Windows installer (optional):** `npm run build:sidecar`, then `npm run dist:win` → the
+   installer is in `dist\`. It's unsigned, so the first launch shows “Windows protected your PC” →
+   **More info → Run anyway**.
+8. **Shortcuts:** wherever this guide says ⌘, use **Ctrl** (e.g. Ctrl+S saves a lead).
 
 ---
 
@@ -268,7 +299,7 @@ Both of you work on the same GitHub repository. Code goes through GitHub; **keys
 To get a normal macOS app you can launch from Finder:
 
 ```
-$ ./scripts/build-sidecar.sh         # if you haven't already
+$ npm run build:sidecar              # if you haven't already
 $ CSC_IDENTITY_AUTODISCOVERY=false npm run dist:dir
 ```
 

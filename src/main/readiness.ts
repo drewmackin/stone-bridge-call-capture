@@ -16,9 +16,9 @@ function svc(configured: boolean, detail: string, ok = configured): ServiceStatu
   return { configured, ok, detail }
 }
 
-/** Path to the built faster-whisper sidecar executable (see Phase 4 build script). */
+/** Path to the built faster-whisper sidecar executable (built by scripts/build_sidecar.py). */
 export function sidecarPath(): string {
-  return resolveResource('whisper-sidecar', 'stone-whisper')
+  return resolveResource('whisper-sidecar', process.platform === 'win32' ? 'stone-whisper.exe' : 'stone-whisper')
 }
 
 export function computeReadiness(): AppReadiness {

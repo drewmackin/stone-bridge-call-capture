@@ -81,6 +81,17 @@ body {
   border-radius: 6px;
 }
 
+/* Windows/Linux: no traffic lights on the left; the native minimize/maximize/
+   close buttons are drawn over the right edge (titleBarOverlay, 3 × 46px), and
+   the bar is solid so it matches that overlay's color exactly. */
+.platform-win .material-toolbar,
+.platform-linux .material-toolbar {
+  padding-left: 16px;
+  padding-right: 152px;
+  background: oklch(var(--navy));
+  backdrop-filter: none;
+}
+
 /* On the navy title bar the ring flips to light gold so it stays visible. */
 .material-toolbar :focus-visible {
   outline-color: oklch(var(--gold-400));
