@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Stone Bridge Strategic Partners — desktop call-capture: record seller calls, transcribe locally, extract leads with AI, review, and push to Google Sheets.",
   "main": "./out/main/index.js",
+  "engines": {
+    "node": ">=20 <24"
+  },
   "author": "Stone Bridge Strategic Partners",
   "license": "UNLICENSED",
   "private": true,

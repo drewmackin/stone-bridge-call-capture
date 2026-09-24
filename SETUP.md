@@ -244,9 +244,12 @@ System Settings → Privacy & Security → Microphone → enable the app (or Ter
 
 The app runs on Windows 10/11 (64‑bit) too. Follow the same steps with these differences:
 
-1. **Install once:** [Git](https://git-scm.com/download/win), [Node.js 20 LTS](https://nodejs.org/en/download)
-   (Windows Installer, x64), and [Python 3.11+](https://www.python.org/downloads/) — in the Python
-   installer tick **“Add python.exe to PATH”**. [GitHub Desktop](https://desktop.github.com) is the
+1. **Install once:** [Git](https://git-scm.com/download/win), **Node.js 22 LTS** — exactly 22, not
+   the newest (on [nodejs.org/en/download](https://nodejs.org/en/download) pick version **v22** →
+   Windows Installer (.msi), x64; or `winget install OpenJS.NodeJS.22`) — and
+   [Python 3.11+](https://www.python.org/downloads/) (3.14 works) — in the Python installer tick
+   **“Add python.exe to PATH”**. Node 24 is not supported: `npm install` stops with “Unsupported
+   engine”. [GitHub Desktop](https://desktop.github.com) is the
    easiest way to clone and push.
 2. **Terminal = PowerShell** (Start → type “PowerShell”). Run the same commands without the `$`:
    `npm install`, `npm run build:sidecar`, `npm run keys`, `npm run dev`, `npm run verify`.
@@ -258,7 +261,8 @@ The app runs on Windows 10/11 (64‑bit) too. Follow the same steps with these d
 5. **Audio:** phone on speaker next to the laptop mic works the same. The optional two‑channel
    “loopback” setup in step 3 is macOS‑specific (BlackHole); on Windows use a USB call‑recording
    adapter that shows up as a stereo microphone.
-6. **If `npm install` fails while rebuilding `better-sqlite3`:** install
+6. **No Visual Studio needed** on Node 22 — the database module downloads ready-made. Only if
+   `npm install` still fails while building `better-sqlite3`, install
    [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with the
    **“Desktop development with C++”** workload, then run `npm run rebuild`.
 7. **Windows installer (optional):** `npm run build:sidecar`, then `npm run dist:win` → the
